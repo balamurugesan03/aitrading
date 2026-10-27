@@ -17,6 +17,8 @@ export const config = {
   // Personal install: the single login. The password is applied on first start and whenever it changes here (see ensureOwnerAccount).
   adminUsername: String(process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase(),
   adminPassword: process.env.ADMIN_PASSWORD || DEFAULT_PASSWORD,
+  // Public sign-up: anyone can create a regular (non-admin) account. Set ALLOW_SIGNUP=false to keep it owner-only.
+  allowSignup: bool(process.env.ALLOW_SIGNUP, true),
   mongoUri: process.env.MONGO_URI || '',
   anthropicKey: process.env.ANTHROPIC_API_KEY || '',
   claudeModel: process.env.CLAUDE_MODEL || 'claude-opus-5-5',

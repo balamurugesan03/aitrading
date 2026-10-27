@@ -1,4 +1,4 @@
-// Single-owner account: login (+2FA), profile, exchange API connections, Telegram, API keys, notifications, audit log.
+// Accounts: owner from .env plus optional public sign-up, login (+2FA), profile, exchange API connections, Telegram, API keys, notifications, audit log.
 import { Router } from 'express';
 import { db } from '../db/index.js';
 import crypto from 'crypto';
@@ -109,6 +109,22 @@ r.post('/auth/reset', wrap(async (req, res) => {
   await audit(user._id, 'auth.password_reset', {}, req);
   notify(user._id, { type: 'warn', title: 'Password was reset', body: 'All other sessions were signed out.', important: true });
   res.json(session(updated));
+}));
+
+// ---- Sign up: regular accounts (role "user"); the owner/admin still comes from .env ----
+r.get('/auth/options', (_req, res) => res.json({ signup: config.allowSignup }));
+
+r.post('/auth/register', wrap(async (req, res) => {
+  if (!config.allowSignup) throw bad('Sign-up is turned off on this server', 403);
+  const email = String(req.body?.username ?? req.body?.email ?? '').trim().toLowerCase();
+  const name = String(req.body?.name || '').trim().slice(0, 60) || email;
+  const password = String(req.body?.password || '');
+  if (!/^[a-z0-9._@+-]{3,60}$/.test(email)) throw bad('Username must be 3-60 characters: letters, numbers and . _ @ + -');
+  checkNewPassword(password);
+  if (await db.users.findOne({ email })) throw bad('That username is already taken', 409);
+  const user = await db.users.insert({ email, name, displayName: name.slice(0, 40), passwordHash: hashPassword(password), role: 'user', status: 'active', tokenVersion: 0, lastLoginAt: Date.now() });
+  await audit(user._id, 'account.created', { username: email, via: 'signup' }, req);
+  res.json(session(user));
 }));
 
 r.post('/auth/login', wrap(async (req, res) => {

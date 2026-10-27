@@ -6,7 +6,7 @@ A personal, multi-exchange AI trading platform for crypto and NSE forex (INR cur
 
 | Area | What it does |
 |---|---|
-| **Login** | One owner account, no sign-up. The username comes from `ADMIN_USERNAME` in `server/.env`, and `ADMIN_PASSWORD` is the initial password. Change the password in the app, or reset it with "Forgot password" (code sent to Telegram) or by changing `ADMIN_PASSWORD` and restarting. Also: TOTP 2FA with QR code, sign-out-everywhere, activity/audit log. |
+| **Login** | One owner (admin) account, plus public sign-up for regular user accounts ("Create account"; turn off with `ALLOW_SIGNUP=false`). The owner username comes from `ADMIN_USERNAME` in `server/.env`, and `ADMIN_PASSWORD` is the initial password. Change the password in the app, or reset it with "Forgot password" (code sent to Telegram) or by changing `ADMIN_PASSWORD` and restarting. Also: TOTP 2FA with QR code, sign-out-everywhere, activity/audit log. |
 | **Security** | Live trades use your own exchange keys, encrypted at rest with AES-256-GCM. |
 | **Forex (NSE via Zerodha)** | USDINR, EURINR, GBPINR and JPYINR near-month currency futures through Zerodha Kite Connect: charts, AI signals, backtests, paper trading in a separate INR wallet, and live bots. See "Forex (Zerodha)" below. |
 | **Multi-exchange** | One adapter interface. Binance, Bybit and OKX support market data plus spot trading (testnet/demo supported). Kraken and Coinbase are market data and paper trading only. |

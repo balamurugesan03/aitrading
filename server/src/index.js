@@ -72,7 +72,7 @@ const apiLimiter = ipRateLimit({ windowMs: 60e3, max: Number(process.env.IP_RATE
 
 function mountApi(prefix) {
   app.use(prefix, apiLimiter);
-  app.use([`${prefix}/auth/login`, `${prefix}/auth/forgot`, `${prefix}/auth/reset`], authLimiter);
+  app.use([`${prefix}/auth/login`, `${prefix}/auth/register`, `${prefix}/auth/forgot`, `${prefix}/auth/reset`], authLimiter);
   app.use(prefix, express.json({ limit: '1mb' }));
   app.get(`${prefix}/branding`, async (_req, res) => res.json((await getGlobal()).branding));
   app.use(prefix, brokersPublic); // Kite login redirect lands here without an app session

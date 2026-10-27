@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ShieldCheck, Brain, Bot, LineChart } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useApp } from '../lib/AppContext.jsx';
@@ -55,18 +55,28 @@ function ResetPassword({ initialUsername, onDone, onCancel }) {
 
 export default function Auth() {
   const { login, branding } = useApp();
-  const [f, setF] = useState({ username: '', password: '', code: '' });
+  const [f, setF] = useState({ name: '', username: '', password: '', confirm: '', code: '' });
   const [need2fa, setNeed2fa] = useState(false);
   const [forgot, setForgot] = useState(false);
+  const [signup, setSignup] = useState(false);
+  const [signupAllowed, setSignupAllowed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const switchMode = (toSignup) => { setErr(''); setNeed2fa(false); setSignup(toSignup); };
+
+  useEffect(() => { api.get('/auth/options').then((o) => setSignupAllowed(Boolean(o?.signup))).catch(() => {}); }, []);
 
   const submit = async (e) => {
     e.preventDefault();
+    if (signup && f.password !== f.confirm) return setErr('The two passwords do not match');
     setBusy(true);
     setErr('');
     try {
+      if (signup) {
+        login(await api.post('/auth/register', { name: f.name, username: f.username, password: f.password }));
+        return;
+      }
       const r = await api.post('/auth/login', { username: f.username, password: f.password, code: need2fa ? f.code : undefined });
       if (r.twoFactorRequired) setNeed2fa(true);
       else login(r);
@@ -93,18 +103,23 @@ export default function Auth() {
       </div>
       {forgot ? <ResetPassword initialUsername={f.username} onDone={login} onCancel={() => setForgot(false)} /> : (
       <form className="card auth-card" onSubmit={submit}>
-        <div className="bold" style={{ fontSize: 18, marginBottom: 18 }}>Sign in</div>
+        <div className="bold" style={{ fontSize: 18, marginBottom: 18 }}>{signup ? 'Create account' : 'Sign in'}</div>
         <div className="col" style={{ gap: 14 }}>
-          <Field label="Username"><input className="input" required autoFocus value={f.username} onChange={set('username')} autoComplete="username" autoCapitalize="none" spellCheck={false} disabled={need2fa} /></Field>
-          <Field label="Password"><input className="input" type="password" required value={f.password} onChange={set('password')} autoComplete="current-password" disabled={need2fa} /></Field>
+          {signup && <Field label="Name"><input className="input" value={f.name} onChange={set('name')} autoComplete="name" maxLength={60} /></Field>}
+          <Field label="Username" hint={signup ? '3-60 characters: letters, numbers, . _ @ + -' : undefined}><input className="input" required autoFocus value={f.username} onChange={set('username')} autoComplete="username" autoCapitalize="none" spellCheck={false} disabled={need2fa} /></Field>
+          <Field label="Password" hint={signup ? 'At least 8 characters' : undefined}><input className="input" type="password" required minLength={signup ? 8 : undefined} value={f.password} onChange={set('password')} autoComplete={signup ? 'new-password' : 'current-password'} disabled={need2fa} /></Field>
+          {signup && <Field label="Confirm password"><input className="input" type="password" required minLength={8} value={f.confirm} onChange={set('confirm')} autoComplete="new-password" /></Field>}
           {need2fa && (
             <Field label="Authenticator code" hint="6 digits from Google Authenticator / Authy">
               <input className="input mono" inputMode="numeric" autoFocus maxLength={6} value={f.code} onChange={set('code')} style={{ letterSpacing: '0.4em', fontSize: 18 }} />
             </Field>
           )}
           {err && <div className="alert error">{err}</div>}
-          <button className="btn primary block" disabled={busy}>{busy ? <Spinner /> : null}{need2fa ? 'Verify & sign in' : 'Sign in'}</button>
-          <button type="button" className="btn ghost block small" onClick={() => { setErr(''); setForgot(true); }}>Forgot password?</button>
+          <button className="btn primary block" disabled={busy}>{busy ? <Spinner /> : null}{signup ? 'Create account' : need2fa ? 'Verify & sign in' : 'Sign in'}</button>
+          {!signup && <button type="button" className="btn ghost block small" onClick={() => { setErr(''); setForgot(true); }}>Forgot password?</button>}
+          {signupAllowed && (signup
+            ? <button type="button" className="btn ghost block small" onClick={() => switchMode(false)}>Already have an account? Sign in</button>
+            : <button type="button" className="btn ghost block small" onClick={() => switchMode(true)}>New here? Create an account</button>)}
           {branding.poweredBy && <div className="tiny dim" style={{ textAlign: 'center' }}>Powered by VelocityX · Not financial advice</div>}
         </div>
       </form>
