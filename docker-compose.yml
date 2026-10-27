@@ -1,0 +1,58 @@
+# Production stack: app + MongoDB + Caddy (automatic HTTPS from Let's Encrypt).
+#   1. cp .env.production.example .env.production   and fill it in
+#   2. Point your domain's DNS A record at this server, set DOMAIN in .env.production
+#   3. docker compose --env-file .env.production up -d --build
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      MONGO_URI: mongodb://mongo:27017/velocityx
+      TRUST_PROXY: "1"
+    volumes:
+      - app-data:/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    command: ["--bind_ip_all", "--quiet"]
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env.production}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+
+volumes:
+  app-data:
+  mongo-data:
+  caddy-data:
+  caddy-config:

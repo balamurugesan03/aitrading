@@ -1,0 +1,22 @@
+{
+  "name": "VelocityX Crypto Trading",
+  "short_name": "VelocityX",
+  "description": "AI crypto trading: regime-aware signals, risk engine, bots and copy trading.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#06080d",
+  "theme_color": "#06080d",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "AI Terminal", "url": "/terminal", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Bot Manager", "url": "/bots", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "AI Scanner", "url": "/scanner", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
