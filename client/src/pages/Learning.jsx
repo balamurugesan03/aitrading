@@ -70,23 +70,23 @@ export default function Learning() {
       <div className="grid g-2">
         <div className="card">
           <div className="card-head"><span className="card-title">Live calibration — predicted vs actual</span><span className="tiny dim">{rep.pipeline.evaluated} resolved signals</span></div>
-          <table>
+          <div className="table-wrap"><table>
             <thead><tr><th>Probability bucket</th><th className="num">Predicted</th><th className="num">Actual TP-first rate</th><th className="num">Signals</th></tr></thead>
             <tbody>{rep.calibration.map((c) => (
               <tr key={c.bucket}><td>{c.bucket}</td><td className="num">{c.predicted ?? '—'}{c.predicted != null && '%'}</td>
                 <td className={`num ${c.actual != null && c.predicted != null ? (Math.abs(c.actual - c.predicted) <= 10 ? 'up' : 'down') : ''}`}>{c.actual ?? '—'}{c.actual != null && '%'}</td><td className="num">{c.n}</td></tr>
             ))}</tbody>
-          </table>
+          </table></div>
           <div className="tiny dim" style={{ marginTop: 6 }}>Green = actual within 10 points of predicted. Needs time: every bot signal is checked against what price did next.</div>
         </div>
         <div className="card">
           <div className="card-head"><span className="card-title">Feature performance</span><span className="tiny dim">correlation of each model's score with winning</span></div>
-          <table>
+          <div className="table-wrap"><table>
             <thead><tr><th>Model</th><th className="num">Correlation</th><th className="num">Signals</th></tr></thead>
             <tbody>{rep.featurePerformance.map((x) => (
               <tr key={x.model}><td>{x.model}</td><td className={`num ${tone(x.correlation)}`}>{x.correlation ?? '— (need 10+)'}</td><td className="num">{x.n}</td></tr>
             ))}</tbody>
-          </table>
+          </table></div>
         </div>
       </div>
 
@@ -95,8 +95,8 @@ export default function Learning() {
           <div className="card" key={title}>
             <div className="card-head"><span className="card-title">{title}</span></div>
             {rows.length ? (
-              <table><thead><tr><th>{key}</th><th className="num">Win rate</th><th className="num">n</th></tr></thead>
-                <tbody>{rows.map((r) => <tr key={r[key]}><td>{key === 'regime' ? <RegimeChip regime={r[key]} /> : r[key]}</td><td className="num">{r.winRate}%</td><td className="num">{r.n}</td></tr>)}</tbody></table>
+              <div className="table-wrap"><table><thead><tr><th>{key}</th><th className="num">Win rate</th><th className="num">n</th></tr></thead>
+                <tbody>{rows.map((r) => <tr key={r[key]}><td>{key === 'regime' ? <RegimeChip regime={r[key]} /> : r[key]}</td><td className="num">{r.winRate}%</td><td className="num">{r.n}</td></tr>)}</tbody></table></div>
             ) : <div className="small dim">No evaluated signals yet.</div>}
           </div>
         ))}
@@ -160,8 +160,8 @@ export default function Learning() {
       </div>) : (
         <div className="card">
           <div className="card-head"><span className="card-title">Model registry</span><span className="tiny dim">managed by the platform admins</span></div>
-          <table><thead><tr><th>Model</th><th>Status</th><th className="num">Accuracy</th><th className="num">OOS P&amp;L</th><th className="num">Brier</th></tr></thead>
-            <tbody>{rep.models.map((m) => <tr key={m._id}><td className="small">{m.name}</td><td><span className={`badge ${STATUS_BADGE[m.status]}`}>{m.status}</span></td><td className="num">{m.metrics ? `${m.metrics.accuracy}%` : '—'}</td><td className={`num ${tone(m.metrics?.oosReturnPct)}`}>{m.metrics ? `${m.metrics.oosReturnPct}%` : '—'}</td><td className="num">{m.metrics?.brier ?? '—'}</td></tr>)}</tbody></table>
+          <div className="table-wrap"><table><thead><tr><th>Model</th><th>Status</th><th className="num">Accuracy</th><th className="num">OOS P&amp;L</th><th className="num">Brier</th></tr></thead>
+            <tbody>{rep.models.map((m) => <tr key={m._id}><td className="small">{m.name}</td><td><span className={`badge ${STATUS_BADGE[m.status]}`}>{m.status}</span></td><td className="num">{m.metrics ? `${m.metrics.accuracy}%` : '—'}</td><td className={`num ${tone(m.metrics?.oosReturnPct)}`}>{m.metrics ? `${m.metrics.oosReturnPct}%` : '—'}</td><td className="num">{m.metrics?.brier ?? '—'}</td></tr>)}</tbody></table></div>
         </div>
       )}
     </>

@@ -89,12 +89,12 @@ function Analysis({ pv }) {
         <span>Delta {a.greeks.delta}</span><span>Theta {inr(a.greeks.theta)}/day</span><span>Vega {inr(a.greeks.vega)}/vol pt</span><span>{pv.lots} lot(s) x {pv.chain.lotSize}</span><span>{pv.chain.expiry} ({pv.chain.daysToExpiry} d)</span>
       </div>
       <PayoffChart analysis={a} />
-      <table>
+      <div className="table-wrap"><table>
         <thead><tr><th>Leg</th><th>Option</th><th className="num">Qty</th><th className="num">Price</th><th className="num">IV</th></tr></thead>
         <tbody>{a.legs.map((l) => (
           <tr key={l.tradingsymbol}><td><span className={`badge ${l.side === 'BUY' ? 'buy' : 'sell'}`}>{l.side}</span></td><td className="mono small">{l.strike} {l.type}</td><td className="num">{l.qty}</td><td className="num">{fmtPrice(l.price)}</td><td className="num">{l.iv ?? '—'}%</td></tr>
         ))}</tbody>
-      </table>
+      </table></div>
       <Gates gates={pv.gates} />
     </div>
   );

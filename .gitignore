@@ -4,3 +4,4 @@ server/data/
 server/.env
 .env.production
 *.log
+server/.env.bak*

@@ -92,14 +92,14 @@ function ComboResult({ r }) {
       {tab === 'wf' && (r.walkForward ? (
         <>
           <div className="small muted" style={{ marginBottom: 10 }}>Anchored walk-forward: parameters are chosen on all data before each fold, then tested on the fold. Efficiency {r.walkForward.efficiency ?? 'n/a'} (out-of-sample return per bar ÷ in-sample return per bar; above 0.5 is healthy).</div>
-          <table>
+          <div className="table-wrap"><table>
             <thead><tr><th>Fold</th><th>Test period</th><th>Params</th><th className="num">In-sample</th><th className="num">Out-of-sample</th><th className="num">OOS trades</th><th className="num">OOS win</th></tr></thead>
             <tbody>{r.walkForward.folds.map((f) => (
               <tr key={f.fold}><td>{f.fold}</td><td className="small muted">{fmtTime(f.from * 1000)} → {fmtTime(f.to * 1000)}</td><td className="small mono">t{f.params.threshold}{f.params.slMult ? ` sl${f.params.slMult} tp${f.params.tpMult}` : ''}</td>
                 <td className={`num ${tone(f.inSample.totalReturnPct)}`}>{fmtPct(f.inSample.totalReturnPct)}</td><td className={`num bold ${tone(f.outOfSample.totalReturnPct)}`}>{fmtPct(f.outOfSample.totalReturnPct)}</td>
                 <td className="num">{f.outOfSample.trades}</td><td className="num">{f.outOfSample.winRate}%</td></tr>
             ))}</tbody>
-          </table>
+          </table></div>
         </>
       ) : <Empty title="Walk-forward disabled" />)}
 
@@ -120,33 +120,33 @@ function ComboResult({ r }) {
       {tab === 'opt' && r.optimization && (
         <>
           <div className="small muted" style={{ marginBottom: 10 }}>Tested {r.optimization.tested} combinations on the training data. The top 5 were re-checked on validation; the best validation result was kept and reported out-of-sample.</div>
-          <table>
+          <div className="table-wrap"><table>
             <thead><tr><th>Threshold</th><th>SL × ATR</th><th>TP × ATR</th><th className="num">Train return</th><th className="num">Train Sharpe</th><th className="num">Validation return</th><th className="num">Validation Sharpe</th></tr></thead>
             <tbody>{r.optimization.top.map((t, k) => (
               <tr key={k} className={k === 0 ? 'oos' : ''}><td>{t.params.threshold}</td><td>{t.params.slMult}</td><td>{t.params.tpMult}</td>
                 <td className={`num ${tone(t.train.totalReturnPct)}`}>{fmtPct(t.train.totalReturnPct)}</td><td className="num">{t.train.sharpe}</td>
                 <td className={`num ${tone(t.validation.totalReturnPct)}`}>{fmtPct(t.validation.totalReturnPct)}</td><td className="num">{t.validation.sharpe}</td></tr>
             ))}</tbody>
-          </table>
+          </table></div>
         </>
       )}
 
       {tab === 'regime' && (
         <>
         {Object.keys(r.segments.full.byDirection || {}).length > 1 || r.segments.full.byDirection?.short ? (
-          <table style={{ marginBottom: 14 }}>
+          <div className="table-wrap"><table style={{ marginBottom: 14 }}>
             <thead><tr><th>Direction</th><th className="num">Trades</th><th className="num">Win rate</th><th className="num">PnL</th></tr></thead>
             <tbody>{Object.entries(r.segments.full.byDirection).map(([k, g]) => (
               <tr key={k}><td><span className={`badge ${k === 'short' ? 'short' : 'long'}`}>{k.toUpperCase()}</span></td><td className="num">{g.trades}</td><td className="num">{g.winRate}%</td><td className={`num ${tone(g.pnl)}`}>{fmtUsd(g.pnl)}</td></tr>
             ))}</tbody>
-          </table>
+          </table></div>
         ) : null}
-        <table>
+        <div className="table-wrap"><table>
           <thead><tr><th>Entry regime</th><th className="num">Trades</th><th className="num">Win rate</th><th className="num">PnL</th></tr></thead>
           <tbody>{Object.entries(r.segments.full.byRegime).map(([k, g]) => (
             <tr key={k}><td><RegimeChip regime={k} /></td><td className="num">{g.trades}</td><td className="num">{g.winRate}%</td><td className={`num ${tone(g.pnl)}`}>{fmtUsd(g.pnl)}</td></tr>
           ))}</tbody>
-        </table>
+        </table></div>
         </>
       )}
 

@@ -17,10 +17,10 @@ function Calendar() {
       <div className="card-head"><span className="card-title"><CalendarClock size={14} /> Economic Calendar</span><span className={`badge ${c.risk.multiplier < 1 ? 'warn' : 'flat'}`}>Risk engine: size × {c.risk.multiplier}</span></div>
       <div className="small muted" style={{ marginBottom: 10 }}>{c.risk.note}. Position size is cut around high-impact USD releases (CPI, FOMC, NFP).</div>
       {upcoming.length ? (
-        <table><thead><tr><th>When</th><th>Event</th><th>Country</th><th>Impact</th><th className="num">Forecast</th><th className="num">Previous</th></tr></thead>
+        <div className="table-wrap"><table><thead><tr><th>When</th><th>Event</th><th>Country</th><th>Impact</th><th className="num">Forecast</th><th className="num">Previous</th></tr></thead>
           <tbody>{upcoming.map((e) => (
             <tr key={e.title + e.time}><td className="small muted">{new Date(e.time).toLocaleString('en-IN', { weekday: 'short', hour: '2-digit', minute: '2-digit' })}</td><td className={e.cryptoMover ? 'bold' : ''}>{e.title}</td><td>{e.country}</td><td><span className={`badge ${e.impact === 'High' ? 'down' : 'warn'}`}>{e.impact}</span></td><td className="num">{e.forecast || '—'}</td><td className="num muted">{e.previous || '—'}</td></tr>
-          ))}</tbody></table>
+          ))}</tbody></table></div>
       ) : <div className="small dim">No remaining high/medium-impact events this week.</div>}
     </div>
   );

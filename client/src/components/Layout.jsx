@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, Link } from 'react-router-dom';
 import {
   LayoutDashboard, CandlestickChart, Radar, Bot, FlaskConical, MessageSquareText, History, Settings,
   PieChart, Globe2, Library, NotebookPen, BrainCircuit, ShieldCheck, OctagonX, Power, Bell, Users, Store,
-  UserCircle, Code2, Crown, LogOut, Download, Layers,
+  UserCircle, Code2, Crown, LogOut, Download, Layers, Menu, X,
 } from 'lucide-react';
 import { useApp } from '../lib/AppContext.jsx';
 import { useBinanceStream } from '../lib/hooks.js';
@@ -84,11 +84,11 @@ function KillSwitch() {
     setBusy(false);
   };
   return enabled ? (
-    <button className="btn kill" onClick={run} disabled={busy} title="Stop all bots, cancel orders, close positions, disable auto-trading">
+    <button className="btn kill tb-kill" onClick={run} disabled={busy} title="Stop all bots, cancel orders, close positions, disable auto-trading">
       {busy ? <Spinner /> : <OctagonX size={15} />} <span className="hide-sm">Kill Switch</span>
     </button>
   ) : (
-    <button className="btn primary" onClick={run} disabled={busy}>{busy ? <Spinner /> : <Power size={15} />} Resume</button>
+    <button className="btn primary tb-kill" onClick={run} disabled={busy}>{busy ? <Spinner /> : <Power size={15} />} <span className="hide-sm">Resume</span></button>
   );
 }
 
@@ -107,7 +107,7 @@ function Notifications() {
     }
   };
   return (
-    <div style={{ position: 'relative' }} ref={ref}>
+    <div className="tb-notif" style={{ position: 'relative' }} ref={ref}>
       <button className="btn ghost icon-btn icon-bubble" onClick={toggle} aria-label="Notifications">
         <Bell size={17} />{me?.unread > 0 && <span className="count">{me.unread > 99 ? '99+' : me.unread}</span>}
       </button>
@@ -132,7 +132,7 @@ function UserMenu() {
   const [open, setOpen] = useState(false);
   const ref = useClickAway(() => setOpen(false));
   return (
-    <div style={{ position: 'relative' }} ref={ref}>
+    <div className="tb-user" style={{ position: 'relative' }} ref={ref}>
       <button className="btn ghost" onClick={() => setOpen(!open)} style={{ padding: '5px 8px' }}>
         <span className="coin-icon" style={{ width: 28, height: 28, background: 'linear-gradient(135deg,var(--accent),var(--accent-2))' }}>{(user?.name || '?').slice(0, 1).toUpperCase()}</span>
       </button>
@@ -157,12 +157,22 @@ function InstallButton() {
     return () => window.removeEventListener('beforeinstallprompt', h);
   }, []);
   if (!prompt) return null;
-  return <button className="btn sm ghost" onClick={() => { prompt.prompt(); setPrompt(null); }} title="Install as an app"><Download size={14} /> <span className="hide-sm">Install app</span></button>;
+  return <button className="btn sm ghost tb-install" onClick={() => { prompt.prompt(); setPrompt(null); }} title="Install as an app"><Download size={14} /> <span className="hide-sm">Install app</span></button>;
 }
+
+const TABS = ['/', '/terminal', '/bots', '/portfolio'];
 
 export default function Layout() {
   const { mode, setMode, status, user, branding, exchange, setExchange } = useApp();
   const loc = useLocation();
+  const [drawer, setDrawer] = useState(false);
+  useEffect(() => setDrawer(false), [loc.pathname]);
+  useEffect(() => {
+    document.body.classList.toggle('no-scroll', drawer);
+    const esc = (e) => e.key === 'Escape' && setDrawer(false);
+    window.addEventListener('keydown', esc);
+    return () => window.removeEventListener('keydown', esc);
+  }, [drawer]);
   const nav = NAV.filter((n) => !n.admin || user?.role === 'admin');
   const current = nav.find((n) => (n.to === '/' ? loc.pathname === '/' : loc.pathname.startsWith(n.to)));
   const groups = [...new Set(nav.map((n) => n.group))];
@@ -171,7 +181,9 @@ export default function Layout() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
+      {drawer && <div className="drawer-bg" onClick={() => setDrawer(false)} />}
+      <aside className={`sidebar ${drawer ? 'open' : ''}`}>
+        <button className="btn ghost icon-btn drawer-close" onClick={() => setDrawer(false)} aria-label="Close menu"><X size={18} /></button>
         <div className="brand">
           <img className="brand-img" src="/logo.png" alt={branding.appName} />
           <div>
@@ -202,19 +214,23 @@ export default function Layout() {
 
       <div className="main">
         <header className="topbar">
+          <button className="btn ghost icon-btn menu-btn" onClick={() => setDrawer(true)} aria-label="Open menu"><Menu size={20} /></button>
           <h1>{current?.label || branding.appName}</h1>
           <TickerStrip />
           <select className="select exchange-pick" style={{ width: 160, padding: '7px 28px 7px 10px' }} value={exchange} onChange={(e) => setExchange(e.target.value)} title="Exchange for market data, scanner and new bots">
             {(status?.exchanges || [{ id: 'binance', name: 'Binance' }]).filter((e) => e.market !== 'options').map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
           </select>
-          <Seg className="mode" value={mode} onChange={setMode} options={[{ value: 'paper', label: 'Paper' }, { value: 'live', label: 'Live' }]} />
+          <Seg className="mode tb-mode" value={mode} onChange={setMode} options={[{ value: 'paper', label: 'Paper' }, { value: 'live', label: 'Live' }]} />
           <InstallButton />
           <Notifications />
           <UserMenu />
           <KillSwitch />
         </header>
-        <nav className="mobile-nav">
-          {nav.map((n) => <NavLink key={n.to} to={n.to} end={n.to === '/'}>{n.label}</NavLink>)}
+        <nav className="tabbar">
+          {TABS.map((to) => nav.find((n) => n.to === to)).filter(Boolean).map((n) => (
+            <NavLink key={n.to} to={n.to} end={n.to === '/'}><n.icon size={20} /><span>{n.label.replace(/^AI /, '').replace(' Manager', 's').replace(' AI', '')}</span></NavLink>
+          ))}
+          <button className={drawer ? 'active' : ''} onClick={() => setDrawer(true)}><Menu size={20} /><span>More</span></button>
         </nav>
         {(status?.offline || halted || exchangeDown || mode === 'live') && (
           <div className="content" style={{ paddingBottom: 0, gap: 10 }}>

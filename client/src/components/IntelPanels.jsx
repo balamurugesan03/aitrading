@@ -61,12 +61,12 @@ export function OrderFlowPanel({ symbol, exchange = 'binance' }) {
       <div>
         <div className="card-title" style={{ marginBottom: 8 }}>Liquidity zones (large resting orders)</div>
         {of.liquidityZones.length ? (
-          <table>
+          <div className="table-wrap"><table>
             <thead><tr><th>Side</th><th className="num">Price</th><th className="num">Size</th><th className="num">Distance</th></tr></thead>
             <tbody>{of.liquidityZones.map((z) => (
               <tr key={`${z.side}${z.price}`}><td className={z.side === 'bid' ? 'up' : 'down'}>{z.side === 'bid' ? 'Bid wall' : 'Ask wall'}</td><td className="num">{fmtPrice(z.price)}</td><td className="num">${fmtCompact(z.usd)}</td><td className="num muted">{z.distPct}%</td></tr>
             ))}</tbody>
-          </table>
+          </table></div>
         ) : <div className="small dim">No unusual walls in the visible book.</div>}
       </div>
     </div>

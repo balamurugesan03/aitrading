@@ -151,7 +151,7 @@ function Connections() {
       <div className="card">
         <div className="card-head"><span className="card-title"><Link2 size={14} /> Exchange API connections</span></div>
         {conns?.length ? (
-          <table>
+          <div className="table-wrap"><table>
             <thead><tr><th>Exchange</th><th>Label</th><th>Key</th><th>Network</th><th>Last test</th><th /></tr></thead>
             <tbody>{conns.map((c) => (
               <tr key={c._id} style={{ opacity: c.active ? 1 : 0.5 }}>
@@ -161,7 +161,7 @@ function Connections() {
                 <td><div className="row" style={{ gap: 4 }}><button className="btn sm" onClick={() => test(c._id)} disabled={busy === c._id}>{busy === c._id ? <Spinner size={12} /> : <PlugZap size={12} />} Test</button><button className="btn sm ghost danger" onClick={() => del(c._id)}><Trash2 size={12} /></button></div></td>
               </tr>
             ))}</tbody>
-          </table>
+          </table></div>
         ) : <Empty icon={Link2} title="No exchanges connected">Paper trading works without keys. Connect an exchange to trade live.</Empty>}
       </div>
       <div className="card col" style={{ gap: 12 }}>
@@ -222,7 +222,7 @@ function ApiKeys() {
           </div>
         )}
         {keys?.length ? (
-          <table>
+          <div className="table-wrap"><table>
             <thead><tr><th>Name</th><th>Key</th><th>Scopes</th><th>Created</th><th>Last used</th><th /></tr></thead>
             <tbody>{keys.map((k) => (
               <tr key={k._id} style={{ opacity: k.revoked ? 0.45 : 1 }}>
@@ -231,7 +231,7 @@ function ApiKeys() {
                 <td>{k.revoked ? <span className="tiny dim">revoked</span> : <button className="btn sm ghost danger" onClick={() => revoke(k._id)}>Revoke</button>}</td>
               </tr>
             ))}</tbody>
-          </table>
+          </table></div>
         ) : <Empty icon={Code2} title="No API keys" />}
       </div>
       <div className="card col" style={{ gap: 12 }}>

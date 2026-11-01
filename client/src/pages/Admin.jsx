@@ -29,8 +29,8 @@ function Overview() {
         </div>
         <div className="card">
           <div className="card-head"><span className="card-title"><BrainCircuit size={14} /> AI models</span><Link className="small" to="/learning">Manage →</Link></div>
-          <table><thead><tr><th>Model</th><th>Status</th><th className="num">Accuracy</th><th className="num">OOS P&amp;L</th></tr></thead>
-            <tbody>{o.models.map((m) => <tr key={m._id}><td className="small">{m.name}</td><td><span className={`badge ${m.status === 'production' ? 'up' : m.status === 'retired' ? 'flat' : 'warn'}`}>{m.status}</span></td><td className="num">{m.accuracy ?? '—'}{m.accuracy != null && '%'}</td><td className={`num ${tone(m.oosReturnPct)}`}>{m.oosReturnPct ?? '—'}{m.oosReturnPct != null && '%'}</td></tr>)}</tbody></table>
+          <div className="table-wrap"><table><thead><tr><th>Model</th><th>Status</th><th className="num">Accuracy</th><th className="num">OOS P&amp;L</th></tr></thead>
+            <tbody>{o.models.map((m) => <tr key={m._id}><td className="small">{m.name}</td><td><span className={`badge ${m.status === 'production' ? 'up' : m.status === 'retired' ? 'flat' : 'warn'}`}>{m.status}</span></td><td className="num">{m.accuracy ?? '—'}{m.accuracy != null && '%'}</td><td className={`num ${tone(m.oosReturnPct)}`}>{m.oosReturnPct ?? '—'}{m.oosReturnPct != null && '%'}</td></tr>)}</tbody></table></div>
         </div>
       </div>
     </>
