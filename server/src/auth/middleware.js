@@ -19,18 +19,32 @@ export async function authenticate(req) {
     const key = await db.apiKeys.findOne({ hash: sha256(String(apiKey)) });
     if (!key || key.revoked) throw Object.assign(new Error('Invalid API key'), { status: 401 });
     const user = await loadUser(key.userId);
-    if (!user || user.status === 'suspended') throw Object.assign(new Error('Account disabled'), { status: 403 });
+    if (!user || user.status === 'suspended' || user.role === 'superadmin') throw Object.assign(new Error('Account disabled'), { status: 403 });
     db.apiKeys.update(key._id, { lastUsedAt: Date.now() });
     return { user, apiKey: key };
   }
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : req.query?.token;
   const payload = verifyToken(token);
-  if (!payload) throw Object.assign(new Error('Please sign in'), { status: 401 });
+  // Trading sessions and Super Admin sessions are separate: neither token works on the other side.
+  if (!payload || payload.scope === SUPERADMIN_SCOPE) throw Object.assign(new Error('Please sign in'), { status: 401 });
   const user = await loadUser(payload.sub);
-  if (!user || (user.tokenVersion || 0) !== (payload.v || 0)) throw Object.assign(new Error('Session expired - sign in again'), { status: 401 });
+  if (!user || user.role === 'superadmin' || (user.tokenVersion || 0) !== (payload.v || 0)) throw Object.assign(new Error('Session expired - sign in again'), { status: 401 });
   if (user.status === 'suspended') throw Object.assign(new Error('Your account is suspended. Contact support.'), { status: 403 });
   return { user };
+}
+
+export const SUPERADMIN_SCOPE = 'superadmin';
+
+// Super Admin panel: only a token issued by /superadmin/auth/login for a superadmin account.
+export async function requireSuperAdmin(req, res, next) {
+  const header = req.headers.authorization || '';
+  const payload = verifyToken(header.startsWith('Bearer ') ? header.slice(7) : null);
+  const user = payload?.scope === SUPERADMIN_SCOPE && (await loadUser(payload.sub).catch(() => null));
+  if (!user || user.role !== 'superadmin' || (user.tokenVersion || 0) !== (payload.v || 0)) return res.status(401).json({ error: 'Super Admin sign-in required' });
+  if (user.status === 'suspended') return res.status(403).json({ error: 'Account disabled' });
+  req.user = user;
+  next();
 }
 
 export const requireAuth = (req, res, next) =>

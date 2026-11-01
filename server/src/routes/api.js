@@ -27,6 +27,7 @@ import { resetPaperWallet } from '../bot/paperBroker.js';
 import { runBacktest, benchmarkStrategies } from '../backtest/backtester.js';
 import { requireAdmin } from '../auth/middleware.js';
 import { audit } from '../notify.js';
+import { assertFeature, assertBotSlot } from '../billing/plans.js';
 
 const r = Router();
 const wrap = (fn) => (req, res) => fn(req, res).catch((err) => res.status(err.status && err.status < 600 ? err.status : 500).json({ error: err.message, checks: err.checks, code: err.code }));
@@ -143,6 +144,7 @@ r.post('/ai/scan', wrap(async (req, res) => {
 
 r.post('/ai/chat', async (req, res) => {
   const { history = [], message, symbol, interval, exchange } = req.body || {};
+  try { await assertFeature(req.user, 'aiAssistant'); } catch (err) { return res.status(err.status || 500).json({ error: err.message, code: err.code }); }
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   try {
@@ -219,6 +221,8 @@ r.get('/bots', wrap(async (req, res) => res.json(await db.bots.find({ userId: ui
 
 r.post('/bots', wrap(async (req, res) => {
   const data = { ...BOT_DEFAULTS, ...pickBot(req.body || {}, req.user) };
+  await assertBotSlot(req.user);
+  if (data.mode === 'live') await assertFeature(req.user, 'liveTrading');
   if (!data.symbol) data.symbol = 'BTCUSDT';
   if (!ex(data.exchange).intervals.includes(data.interval)) throw bad(`${ex(data.exchange).name} does not support ${data.interval}`);
   if (data.strategy === 'grid' && !['15m', '1h', '30m', '4h'].includes(data.interval)) data.interval = '1h';
@@ -231,6 +235,7 @@ r.post('/bots', wrap(async (req, res) => {
 r.patch('/bots/:id', wrap(async (req, res) => {
   const bot = await ownBot(req);
   const patch = pickBot(req.body || {}, req.user);
+  if (patch.mode === 'live') await assertFeature(req.user, 'liveTrading');
   if (bot.position && (patch.symbol || patch.mode || patch.exchange || patch.strategy)) throw bad('Close the open position before changing symbol, mode, exchange or strategy');
   res.json(await db.bots.update(bot._id, patch));
 }));
@@ -248,6 +253,7 @@ r.post('/bots/:id/start', wrap(async (req, res) => {
   const bot = await ownBot(req);
   const s = await getSettings(uid(req));
   if (!s.tradingEnabled) throw bad(s.platformHalt ? `Trading is paused platform-wide: ${s.platformHalt}` : 'Auto-trading is disabled by your kill switch. Re-enable trading first.');
+  if (bot.mode === 'live') await assertFeature(req.user, 'liveTrading');
   const st = getStrategy(bot.strategy);
   if (st?.liveOnly && !hasClaude()) throw bad('This strategy needs ANTHROPIC_API_KEY on the server');
   const updated = await db.bots.update(bot._id, { status: 'running', lastCandleTime: null, pausedReason: null });
@@ -299,6 +305,7 @@ r.get('/trades', wrap(async (req, res) => {
 r.post('/trade', wrap(async (req, res) => {
   const { symbol, side, mode = 'paper', quoteAmount, quantity, exchange, short = false } = req.body || {};
   if (!['BUY', 'SELL'].includes(side)) throw bad('side must be BUY or SELL');
+  if (mode === 'live') await assertFeature(req.user, 'liveTrading');
   // short=true: SELL opens a short (quoteAmount), BUY covers it (quantity). Otherwise BUY opens a long, SELL closes it.
   const opening = short ? side === 'SELL' : side === 'BUY';
   if (short && !ex(exOf(exchange)).canShort) throw bad(`${ex(exOf(exchange)).name} cannot be sold short`);

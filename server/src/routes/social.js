@@ -9,6 +9,7 @@ import { benchmarkStrategy } from '../backtest/backtester.js';
 import { leaderboard, closeCopyPosition } from '../bot/copyEngine.js';
 import { EXCHANGES } from '../exchange/index.js';
 import { audit, notify } from '../notify.js';
+import { requireFeature, assertFeature } from '../billing/plans.js';
 
 const r = Router();
 const wrap = (fn) => (req, res) => fn(req, res).catch((err) => res.status(err.status || 500).json({ error: err.message }));
@@ -132,8 +133,9 @@ r.get('/copy/following', wrap(async (req, res) => {
   res.json(out);
 }));
 
-r.post('/copy/follow', wrap(async (req, res) => {
+r.post('/copy/follow', requireFeature('copyTrading'), wrap(async (req, res) => {
   const { leaderBotId, mode = 'paper', multiplier = 1, maxTradeUsd = 0, exchange } = req.body || {};
+  if (mode === 'live') await assertFeature(req.user, 'liveTrading');
   const bot = await db.bots.findOne({ _id: leaderBotId });
   if (!bot || !bot.copyable) throw bad('This bot is not open for copying');
   if (bot.userId === req.user._id) throw bad('You cannot copy your own bot');

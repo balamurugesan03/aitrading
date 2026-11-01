@@ -7,6 +7,7 @@ import { requireAuth, publicUser, invalidateUser } from '../auth/middleware.js';
 import { audit, notify, testTelegram, sendTelegram } from '../notify.js';
 import { EXCHANGES, listExchanges } from '../exchange/index.js';
 import { config } from '../config.js';
+import { planFor, FEATURES } from '../billing/plans.js';
 
 const r = Router();
 const wrap = (fn) => (req, res) => fn(req, res).catch((err) => res.status(err.status || 500).json({ error: err.message, code: err.code }));
@@ -42,7 +43,7 @@ async function claimLegacyData(userId) {
 export async function ensureOwnerAccount() {
   const username = config.adminUsername;
   const password = config.adminPassword;
-  const users = await db.users.find({}, { sort: { createdAt: 1 } });
+  const users = (await db.users.find({}, { sort: { createdAt: 1 } })).filter((u) => u.role !== 'superadmin');
   const owner = users.find((u) => u.role === 'admin') || users[0];
   if (!owner) {
     const user = await db.users.insert({ email: username, name: username, displayName: username, passwordHash: hashPassword(password), envPasswordHash: hashPassword(password), role: 'admin', status: 'active', tokenVersion: 0 });
@@ -80,7 +81,8 @@ const codeHash = (code) => crypto.createHmac('sha256', 'pw-reset').update(String
 
 r.post('/auth/forgot', wrap(async (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
-  const user = username && (await db.users.findOne({ email: username }));
+  const found = username && (await db.users.findOne({ email: username }));
+  const user = found?.role === 'superadmin' ? null : found; // the Super Admin resets through SUPERADMIN_PASSWORD only
   const telegram = Boolean(user?.telegram?.enabled && user.telegram.token && user.telegram.chatId);
   if (telegram) {
     const code = String(crypto.randomInt(0, 1e6)).padStart(6, '0');
@@ -131,7 +133,8 @@ r.post('/auth/login', wrap(async (req, res) => {
   const email = String(req.body?.username ?? req.body?.email ?? '').trim().toLowerCase();
   const key = `${email}|${req.ip}`;
   if (tooMany(key)) throw bad('Too many attempts - try again in 15 minutes', 429);
-  const user = await db.users.findOne({ email });
+  const found = await db.users.findOne({ email });
+  const user = found?.role === 'superadmin' ? null : found; // Super Admin signs in only at /superadmin
   if (!user || !verifyPassword(String(req.body?.password || ''), user.passwordHash)) {
     fail(key);
     if (user) await audit(user._id, 'auth.login_failed', {}, req);
@@ -293,6 +296,37 @@ r.delete('/account/apikeys/:id', wrap(async (req, res) => {
   if (!k || k.userId !== req.user._id) throw bad('Not found', 404);
   await db.apiKeys.update(k._id, { revoked: true });
   await audit(req.user._id, 'apikey.revoke', { name: k.name }, req);
+  res.json({ ok: true });
+}));
+
+// ---- Subscription: current plan, available plans, upgrade requests (approved in the Super Admin panel) ----
+const planView = (p) => p && ({ _id: p._id, code: p.code, name: p.name, description: p.description, price: p.price, currency: p.currency, interval: p.interval, features: p.features, isDefault: Boolean(p.isDefault) });
+
+r.get('/account/subscription', wrap(async (req, res) => {
+  const { plan, subscription } = await planFor(req.user);
+  const [plans, pending, bots, optionBots] = await Promise.all([
+    db.plans.find({ active: true }, { sort: { price: 1 } }),
+    db.subscriptions.findOne({ userId: req.user._id, status: 'pending' }),
+    db.bots.count({ userId: req.user._id }), db.optionBots.count({ userId: req.user._id }),
+  ]);
+  res.json({
+    plan: planView(plan), subscription, pending, plans: plans.map(planView), features: FEATURES,
+    usage: { bots: bots + optionBots }, exempt: req.user.role === 'admin',
+  });
+}));
+
+r.post('/account/subscription/request', wrap(async (req, res) => {
+  const plan = await db.plans.findOne({ _id: String(req.body?.planId || '') });
+  if (!plan || !plan.active) throw bad('Plan not found', 404);
+  if (await db.subscriptions.findOne({ userId: req.user._id, status: 'pending' })) throw bad('You already have a pending request - wait for it or cancel it');
+  const sub = await db.subscriptions.insert({ userId: req.user._id, planId: plan._id, planName: plan.name, status: 'pending', amount: plan.price, currency: plan.currency, note: String(req.body?.note || '').slice(0, 300), requestedAt: Date.now() });
+  await audit(req.user._id, 'subscription.request', { plan: plan.name }, req);
+  res.json(sub);
+}));
+
+r.delete('/account/subscription/request', wrap(async (req, res) => {
+  const p = await db.subscriptions.findOne({ userId: req.user._id, status: 'pending' });
+  if (p) await db.subscriptions.update(p._id, { status: 'withdrawn' });
   res.json({ ok: true });
 }));
 

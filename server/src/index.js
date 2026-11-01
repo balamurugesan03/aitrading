@@ -10,6 +10,8 @@ import { initDb, closeDb, dbReady, dbKind } from './db/index.js';
 import api from './routes/api.js';
 import authRoutes, { ensureOwnerAccount } from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
+import superAdminRoutes, { ensureSuperAdminAccount } from './routes/superadmin.js';
+import { seedPlans } from './billing/plans.js';
 import socialRoutes, { loadCustomStrategies } from './routes/social.js';
 import brokerRoutes, { brokersPublic } from './routes/brokers.js';
 import optionRoutes from './routes/options.js';
@@ -48,6 +50,8 @@ process.on('uncaughtException', (err) => {
 
 await initDb();
 await ensureOwnerAccount();
+await ensureSuperAdminAccount();
+await seedPlans();
 await getGlobal();
 await initModelRegistry();
 const customCount = await loadCustomStrategies();
@@ -72,9 +76,10 @@ const apiLimiter = ipRateLimit({ windowMs: 60e3, max: Number(process.env.IP_RATE
 
 function mountApi(prefix) {
   app.use(prefix, apiLimiter);
-  app.use([`${prefix}/auth/login`, `${prefix}/auth/register`, `${prefix}/auth/forgot`, `${prefix}/auth/reset`], authLimiter);
+  app.use([`${prefix}/auth/login`, `${prefix}/auth/register`, `${prefix}/auth/forgot`, `${prefix}/auth/reset`, `${prefix}/superadmin/auth/login`], authLimiter);
   app.use(prefix, express.json({ limit: '1mb' }));
   app.get(`${prefix}/branding`, async (_req, res) => res.json((await getGlobal()).branding));
+  app.use(prefix, superAdminRoutes); // separate Super Admin login + panel, before the trading auth wall
   app.use(prefix, brokersPublic); // Kite login redirect lands here without an app session
   app.use(prefix, authRoutes); // login is public; everything after this router is authenticated
   app.use(prefix, brokerRoutes);
@@ -122,7 +127,7 @@ wss.on('connection', async (ws, req) => {
     const token = new URL(req.url, 'http://x').searchParams.get('token');
     const payload = verifyToken(token);
     const user = payload && (await db.users.findOne({ _id: payload.sub }));
-    if (!user || (user.tokenVersion || 0) !== (payload.v || 0) || user.status === 'suspended') return ws.close(4401, 'unauthorized');
+    if (!user || payload.scope || user.role === 'superadmin' || (user.tokenVersion || 0) !== (payload.v || 0) || user.status === 'suspended') return ws.close(4401, 'unauthorized');
     ws.userId = user._id;
   } catch {
     ws.close(1011, 'server error');

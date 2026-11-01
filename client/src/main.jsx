@@ -25,6 +25,7 @@ import Admin from './pages/Admin.jsx';
 import Copy from './pages/Copy.jsx';
 import Marketplace from './pages/Marketplace.jsx';
 import ApiDocs from './pages/ApiDocs.jsx';
+import SuperAdmin from './pages/SuperAdmin.jsx';
 
 function Gate() {
   const { authed } = useApp();
@@ -61,9 +62,11 @@ function Gate() {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
-      <AppProvider>
-        <Gate />
-      </AppProvider>
+      <Routes>
+        {/* Super Admin: its own login and session, separate from the trading app */}
+        <Route path="/superadmin/*" element={<SuperAdmin />} />
+        <Route path="*" element={<AppProvider><Gate /></AppProvider>} />
+      </Routes>
     </BrowserRouter>
   </React.StrictMode>,
 );

@@ -5,6 +5,7 @@ const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boole
 
 export const isProd = process.env.NODE_ENV === 'production';
 const DEFAULT_PASSWORD = 'admin123'; // local development only - production refuses to start with it
+const DEFAULT_SUPERADMIN_PASSWORD = 'superadmin123'; // local development only
 
 export const config = {
   port: Number(process.env.PORT || 5000),
@@ -17,6 +18,10 @@ export const config = {
   // Personal install: the single login. The password is applied on first start and whenever it changes here (see ensureOwnerAccount).
   adminUsername: String(process.env.ADMIN_USERNAME || 'admin').trim().toLowerCase(),
   adminPassword: process.env.ADMIN_PASSWORD || DEFAULT_PASSWORD,
+  // Super Admin: a separate login (/superadmin) for plans, subscriptions and users. It cannot sign in to the trading app,
+  // and trading accounts cannot sign in to the Super Admin panel. Same .env sync/reset rules as ADMIN_PASSWORD.
+  superAdminUsername: String(process.env.SUPERADMIN_USERNAME || 'superadmin').trim().toLowerCase(),
+  superAdminPassword: process.env.SUPERADMIN_PASSWORD || DEFAULT_SUPERADMIN_PASSWORD,
   // Public sign-up: anyone can create a regular (non-admin) account. Set ALLOW_SIGNUP=false to keep it owner-only.
   allowSignup: bool(process.env.ALLOW_SIGNUP, true),
   mongoUri: process.env.MONGO_URI || '',
@@ -42,11 +47,14 @@ export const hasBinanceKeys = () => Boolean(config.binance.apiKey && config.bina
 export function validateConfig() {
   if (!isProd) {
     if (config.adminPassword === DEFAULT_PASSWORD) console.warn(`[config] WARNING: using the default login ${config.adminUsername} / ${DEFAULT_PASSWORD} - set ADMIN_PASSWORD in server/.env`);
+    if (config.superAdminPassword === DEFAULT_SUPERADMIN_PASSWORD) console.warn(`[config] WARNING: using the default Super Admin login ${config.superAdminUsername} / ${DEFAULT_SUPERADMIN_PASSWORD} - set SUPERADMIN_PASSWORD in server/.env`);
     return;
   }
   const errors = [];
   const warnings = [];
   if (config.adminPassword === DEFAULT_PASSWORD || config.adminPassword.length < 12) errors.push('ADMIN_PASSWORD must be set to at least 12 characters (and not the development default).');
+  if (config.superAdminPassword === DEFAULT_SUPERADMIN_PASSWORD || config.superAdminPassword.length < 12) errors.push('SUPERADMIN_PASSWORD must be set to at least 12 characters (and not the development default).');
+  if (config.superAdminUsername === config.adminUsername) errors.push('SUPERADMIN_USERNAME must differ from ADMIN_USERNAME.');
   if (!/^[0-9a-f]{64}$/i.test(process.env.MASTER_KEY || '')) errors.push('MASTER_KEY must be set to 64 hex chars (openssl rand -hex 32). A generated key file is too easy to lose in production.');
   if (!config.mongoUri) errors.push('MONGO_URI is required in production (the JSON file store is for local use only).');
   if (!/^https:\/\//.test(config.appUrl)) errors.push('APP_URL must be the public https:// URL of the app.');

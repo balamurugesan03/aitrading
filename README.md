@@ -69,6 +69,7 @@ Set `ADMIN_PASSWORD` in `server/.env`, then double-click `start.bat` and sign in
 | `PAPER_FX_START_BALANCE` | Starting balance of the forex paper wallet (default 1000000 INR) |
 | `PAPER_REJECT_RATE` | Simulated exchange rejection rate for paper orders (default 0.002) |
 | `MASTER_KEY` | 64 hex chars that encrypt stored exchange keys. If empty, one is generated in `server/data/master.key`. **Back it up.** |
+| `SUPERADMIN_USERNAME` / `SUPERADMIN_PASSWORD` | Separate Super Admin login at `/superadmin` (subscription plans, user subscriptions, upgrade requests, payments). It cannot sign in to trading and trading accounts cannot sign in there. Development default: `superadmin` / `superadmin123` |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | The login. `ADMIN_PASSWORD` is applied on first start and whenever you change it (restart), which is the offline password reset. Development default: `admin` / `admin123` |
 | `APP_URL` | Public app URL (https in production) |
 | `DATA_DIR` | Folder for `db.json` and `master.key` (default `server/data`) |
@@ -137,6 +138,7 @@ Set `NSE_HOLIDAYS` in `server/.env` to the year's NSE trading holidays (YYYY-MM-
 - `MONGO_URI`
 - `APP_URL`: must be an `https://` URL
 - `ADMIN_PASSWORD`: at least 12 characters
+- `SUPERADMIN_PASSWORD`: at least 12 characters (and `SUPERADMIN_USERNAME` different from `ADMIN_USERNAME`)
 
 Production mode also changes these defaults:
 - CORS is limited to `APP_URL` and `CORS_ORIGINS`.

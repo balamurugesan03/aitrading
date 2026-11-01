@@ -32,7 +32,7 @@ r.get('/admin/overview', wrap(async (_req, res) => {
 
 r.get('/admin/users', wrap(async (_req, res) => {
   const [users, bots] = await Promise.all([db.users.find({}, { sort: { createdAt: -1 } }), db.bots.find({})]);
-  res.json(users.map((u) => ({
+  res.json(users.filter((u) => u.role !== 'superadmin').map((u) => ({
     ...publicUser(u),
     bots: bots.filter((b) => b.userId === u._id).length, runningBots: bots.filter((b) => b.userId === u._id && b.status === 'running').length,
   })));
@@ -40,7 +40,7 @@ r.get('/admin/users', wrap(async (_req, res) => {
 
 r.patch('/admin/users/:id', wrap(async (req, res) => {
   const u = await db.users.findOne({ _id: req.params.id });
-  if (!u) throw bad('User not found', 404);
+  if (!u || u.role === 'superadmin') throw bad('User not found', 404);
   const patch = {};
   const { role, status } = req.body || {};
   if (role && ['user', 'admin'].includes(role)) {

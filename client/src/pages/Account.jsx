@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { UserCircle, KeyRound, ShieldCheck, Link2, Send, Code2, ScrollText, Trash2, PlugZap, Copy } from 'lucide-react';
+import { Crown, UserCircle, KeyRound, ShieldCheck, Link2, Send, Code2, ScrollText, Trash2, PlugZap, Copy } from 'lucide-react';
 import { api, setToken } from '../lib/api.js';
 import { useApp } from '../lib/AppContext.jsx';
 import { usePoll } from '../lib/hooks.js';
@@ -261,16 +261,67 @@ function AuditLog() {
   );
 }
 
+const planPrice = (p) => (p.price ? `${p.currency === 'INR' ? '₹' : p.currency === 'USD' ? '$' : `${p.currency} `}${Number(p.price).toLocaleString('en-IN')} / ${p.interval}` : 'Free');
+
+function Subscription() {
+  const { toast } = useApp();
+  const [s, , reload] = usePoll('/account/subscription');
+  if (!s) return <div className="empty"><Spinner /></div>;
+  const request = async (p) => {
+    if (!confirm(`Request an upgrade to ${p.name} (${planPrice(p)})? The admin activates it once payment is confirmed.`)) return;
+    try { await api.post('/account/subscription/request', { planId: p._id }); toast('Request sent - you will be notified when it is approved'); reload(); } catch (e) { toast(e.message, 'err'); }
+  };
+  const withdraw = async () => { try { await api.del('/account/subscription/request'); toast('Request withdrawn'); reload(); } catch (e) { toast(e.message, 'err'); } };
+  return (
+    <>
+      <div className="card col" style={{ gap: 10, marginBottom: 18 }}>
+        <div className="card-title"><Crown size={14} /> Your plan</div>
+        <div className="row" style={{ gap: 12, alignItems: 'baseline' }}>
+          <span className="bold" style={{ fontSize: 22 }}>{s.plan?.name}</span>
+          <span className="muted">{planPrice(s.plan)}</span>
+          {s.subscription?.endAt && <span className="badge up">valid until {new Date(s.subscription.endAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</span>}
+        </div>
+        {s.exempt
+          ? <div className="small muted">You are the platform owner - plan limits do not apply to your account.</div>
+          : <div className="small muted">Bots used: {s.usage.bots} / {s.plan?.features?.maxBots ?? 0}</div>}
+        {s.pending && (
+          <div className="alert info small row between">
+            <span>Upgrade to <b>{s.pending.planName}</b> requested - waiting for admin approval.</span>
+            <button className="btn small" onClick={withdraw}>Withdraw</button>
+          </div>
+        )}
+      </div>
+      <div className="grid g-3">
+        {s.plans.map((p) => {
+          const current = p._id === s.plan?._id;
+          return (
+            <div key={p._id} className="card col" style={{ gap: 10, borderColor: current ? 'var(--accent)' : undefined }}>
+              <div className="row between"><span className="bold" style={{ fontSize: 17 }}>{p.name}</span>{current && <span className="badge accent">current</span>}</div>
+              <div className="stat-value" style={{ fontSize: 22 }}>{planPrice(p)}</div>
+              {p.description && <div className="small muted">{p.description}</div>}
+              <div className="kv">
+                {Object.entries(s.features).map(([k, f]) => [<span key={`${k}l`}>{f.label}</span>, <span key={`${k}v`}>{f.type === 'number' ? p.features?.[k] ?? 0 : p.features?.[k] ? '✓' : '—'}</span>])}
+              </div>
+              {!current && !s.exempt && p.price > 0 && <button className="btn primary" style={{ marginTop: 'auto' }} disabled={Boolean(s.pending)} onClick={() => request(p)}>Request {p.name}</button>}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 export default function Account() {
   const [tab, setTab] = useState('profile');
   useEffect(() => { const t = new URLSearchParams(location.search).get('tab'); if (t) setTab(t); }, []);
   return (
     <>
       <Tabs value={tab} onChange={setTab} tabs={[
-        { value: 'profile', label: 'Profile' }, { value: '2fa', label: 'Two-factor auth' }, { value: 'connections', label: 'Exchange connections' },
+        { value: 'profile', label: 'Profile' }, { value: 'subscription', label: 'Subscription' }, { value: '2fa', label: 'Two-factor auth' }, { value: 'connections', label: 'Exchange connections' },
         { value: 'telegram', label: 'Telegram alerts' }, { value: 'apikeys', label: 'API keys' }, { value: 'audit', label: 'Activity log' },
       ]} />
       {tab === 'profile' && <Profile />}
+      {tab === 'subscription' && <Subscription />}
       {tab === '2fa' && <TwoFactor />}
       {tab === 'connections' && <Connections />}
       {tab === 'telegram' && <Telegram />}

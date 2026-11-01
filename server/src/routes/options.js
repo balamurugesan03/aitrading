@@ -7,6 +7,7 @@ import { previewTrade, openTrade, closeTrade, markPosition, optionsAccount, rese
 import { OPTION_BOT_DEFAULTS, startOptionBot, stopOptionBot } from '../options/bot.js';
 import { getSettings } from '../bot/safety.js';
 import { audit } from '../notify.js';
+import { requireFeature, assertBotSlot, assertFeature } from '../billing/plans.js';
 
 const r = Router();
 const wrap = (fn) => (req, res) => fn(req, res).catch((err) => res.status(err.status && err.status !== 401 ? err.status : 400).json({ error: err.message, code: err.code, preview: err.preview }));
@@ -33,7 +34,8 @@ const tradeReq = (b) => ({
 });
 
 r.post('/options/preview', wrap(async (req, res) => res.json(await previewTrade(req.user, tradeReq(req.body || {})))));
-r.post('/options/trade', wrap(async (req, res) => {
+r.post('/options/trade', requireFeature('options'), wrap(async (req, res) => {
+  if (req.body?.mode === 'live') await assertFeature(req.user, 'liveTrading');
   const out = await openTrade(req.user, tradeReq(req.body || {}), { reason: 'Manual' });
   res.json(out.position);
 }));
@@ -89,7 +91,8 @@ async function ownBot(req) {
   return b;
 }
 r.get('/options/bots', wrap(async (req, res) => res.json(await db.optionBots.find({ userId: req.user._id }, { sort: { createdAt: -1 } }))));
-r.post('/options/bots', wrap(async (req, res) => {
+r.post('/options/bots', requireFeature('options'), wrap(async (req, res) => {
+  await assertBotSlot(req.user);
   const data = { ...OPTION_BOT_DEFAULTS, ...pickBot(req.body || {}) };
   if (!data.name) data.name = `${data.underlying} ${data.template === 'auto' ? 'AI Options' : TEMPLATES[data.template].name}`;
   const b = await db.optionBots.insert({ ...data, userId: req.user._id, status: 'stopped', stats: { trades: 0, wins: 0, pnl: 0 } });
@@ -100,8 +103,9 @@ r.patch('/options/bots/:id', wrap(async (req, res) => {
   const b = await ownBot(req);
   res.json(await db.optionBots.update(b._id, pickBot(req.body || {})));
 }));
-r.post('/options/bots/:id/start', wrap(async (req, res) => {
+r.post('/options/bots/:id/start', requireFeature('options'), wrap(async (req, res) => {
   const b = await ownBot(req);
+  if (b.mode === 'live') await assertFeature(req.user, 'liveTrading');
   if (!(await getSettings(req.user._id)).tradingEnabled) throw bad('Auto-trading is disabled by the kill switch');
   const u = await db.optionBots.update(b._id, { status: 'running', startedAt: Date.now() });
   startOptionBot(b._id);
