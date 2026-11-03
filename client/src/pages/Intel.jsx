@@ -5,6 +5,7 @@ import { useApp } from '../lib/AppContext.jsx';
 import { OrderFlowPanel, FuturesPanel, NewsPanel } from '../components/IntelPanels.jsx';
 import { CoinIcon, Seg } from '../components/ui.jsx';
 import { baseOf } from '../lib/format.js';
+import CoinSearch from '../components/CoinSearch.jsx';
 
 const COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT'];
 
@@ -43,6 +44,7 @@ export default function Intel() {
                 <span className="row" style={{ gap: 6 }}><CoinIcon symbol={s} size={16} />{baseOf(s)}</span>
               </button>
             ))}
+            <CoinSearch onPick={setSymbol} exchange={['binance', 'bybit', 'okx'].includes(exchange) ? exchange : 'binance'} />
           </div>
         </div>
       </div>

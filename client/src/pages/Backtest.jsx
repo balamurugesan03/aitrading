@@ -5,6 +5,7 @@ import { useApp } from '../lib/AppContext.jsx';
 import { usePoll } from '../lib/hooks.js';
 import { EquityChart } from '../components/CandleChart.jsx';
 import { Field, Switch, Spinner, Empty, Histogram, RegimeChip, Tabs } from '../components/ui.jsx';
+import CoinSearch from '../components/CoinSearch.jsx';
 import { fmtUsd, fmtPct, fmtPrice, fmtTime, tone } from '../lib/format.js';
 
 const COINS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT'];
@@ -202,7 +203,8 @@ export default function Backtest() {
       <div className="card" style={{ alignSelf: 'start' }}>
         <div className="card-head"><span className="card-title"><FlaskConical size={14} /> Backtest Lab 2.0</span></div>
         <div className="col" style={{ gap: 12 }}>
-          <Field label={fx ? 'Pairs (NSE futures)' : stocks ? 'Stocks (NSE)' : 'Coins (up to 5)'}><Toggles options={fx ? FX_PAIRS : stocks ? STOCKS : COINS} value={f.symbols} onChange={set('symbols')} max={5} /></Field>
+          <Field label={fx ? 'Pairs (NSE futures)' : stocks ? 'Stocks (NSE)' : 'Coins (up to 5)'}><Toggles options={fx ? FX_PAIRS : stocks ? STOCKS : [...new Set([...COINS, ...f.symbols])]} value={f.symbols} onChange={set('symbols')} max={5} />
+            {!fx && !stocks && <div style={{ marginTop: 6 }}><CoinSearch onPick={(c) => !f.symbols.includes(c) && f.symbols.length < 5 && set('symbols')([...f.symbols, c])} /></div>}</Field>
           <Field label="Timeframes (up to 4)"><Toggles options={fx || stocks ? FX_TFS : TFS} value={f.intervals} onChange={set('intervals')} max={4} /></Field>
           <Field label="Strategy">
             <select className="select" value={f.strategy} onChange={set('strategy')}>{strategies.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
