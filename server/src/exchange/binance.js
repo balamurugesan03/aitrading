@@ -5,11 +5,16 @@ import { config, hasBinanceKeys } from '../config.js';
 const LIVE_URL = 'https://api.binance.com';
 const TESTNET_URL = 'https://testnet.binance.vision';
 
-const tradeBase = () => config.binance.baseUrl || (config.binance.testnet ? TESTNET_URL : LIVE_URL);
-const dataBases = () => [...new Set([config.binance.baseUrl || LIVE_URL, config.binance.dataUrl])];
+const liveBase = () => config.binance.relayUrl || config.binance.baseUrl || LIVE_URL;
+const tradeBase = () => (config.binance.testnet && !config.binance.baseUrl ? TESTNET_URL : liveBase());
+const dataBases = () => [...new Set([liveBase(), config.binance.dataUrl])];
+
+// Adds the relay secret to requests that go through the relay.
+export const relayHeaders = (url) =>
+  config.binance.relayUrl && url.startsWith(config.binance.relayUrl) ? { 'X-Relay-Key': config.binance.relayKey } : {};
 
 async function http(url, opts = {}) {
-  const res = await fetch(url, { ...opts, signal: AbortSignal.timeout(10000) });
+  const res = await fetch(url, { ...opts, headers: { ...opts.headers, ...relayHeaders(url) }, signal: AbortSignal.timeout(10000) });
   const text = await res.text();
   const body = text ? JSON.parse(text) : null;
   if (!res.ok) {
@@ -41,7 +46,7 @@ const envCreds = () => ({ apiKey: config.binance.apiKey, apiSecret: config.binan
 
 async function signed(method, pathname, params = {}, creds = envCreds()) {
   if (!creds?.apiKey || !creds?.apiSecret) throw new Error('No Binance API keys connected. Add them under Account -> API connections.');
-  const base = creds.testnet ? TESTNET_URL : config.binance.baseUrl || LIVE_URL;
+  const base = creds.testnet ? TESTNET_URL : liveBase();
   const qs = new URLSearchParams({ ...params, recvWindow: 5000, timestamp: Date.now() }).toString();
   const signature = crypto.createHmac('sha256', creds.apiSecret).update(qs).digest('hex');
   return http(`${base}${pathname}?${qs}&signature=${signature}`, {

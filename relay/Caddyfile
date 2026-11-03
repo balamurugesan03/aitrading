@@ -1,0 +1,45 @@
+# Binance relay: runs on the India VPS. Forwards the main app's Binance calls (account, orders, futures data)
+# so they leave from an allowed region. Only the main server's IP with the shared secret gets through.
+(upstream) {
+	header_up Host {upstream_hostport}
+	header_up -X-Relay-Key
+	header_up -X-Forwarded-For
+	header_up -X-Forwarded-Host
+	header_up -X-Forwarded-Proto
+}
+
+{$RELAY_DOMAIN} {
+	route {
+		@stranger not remote_ip {$ALLOWED_IP}
+		abort @stranger
+
+		@nokey not header X-Relay-Key {$RELAY_KEY}
+		respond @nokey 403
+
+		# Futures REST
+		@futures path /fapi/* /futures/*
+		handle @futures {
+			reverse_proxy https://fapi.binance.com {
+				import upstream
+			}
+		}
+
+		# Futures WebSocket (liquidation stream): /fws/ws/... -> fstream.binance.com/ws/...
+		handle_path /fws/* {
+			reverse_proxy https://fstream.binance.com {
+				import upstream
+			}
+		}
+
+		# Spot REST (account, orders, market data)
+		handle {
+			reverse_proxy https://api.binance.com {
+				import upstream
+			}
+		}
+	}
+	log {
+		output stdout
+		format console
+	}
+}

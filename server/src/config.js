@@ -33,6 +33,9 @@ export const config = {
     testnet: bool(process.env.BINANCE_TESTNET, true),
     baseUrl: process.env.BINANCE_BASE_URL || '',
     dataUrl: process.env.BINANCE_DATA_URL || 'https://data-api.binance.vision',
+    // Relay in an allowed region (see relay/README.md). When set, all live Spot + Futures calls go through it.
+    relayUrl: (process.env.BINANCE_RELAY_URL || '').replace(/\/+$/, ''),
+    relayKey: process.env.BINANCE_RELAY_KEY || '',
   },
   paperStartBalance: Number(process.env.PAPER_START_BALANCE || 10000),
   paperFxStartBalance: Number(process.env.PAPER_FX_START_BALANCE || 1000000), // INR paper wallet for NSE forex
@@ -58,6 +61,7 @@ export function validateConfig() {
   if (!/^[0-9a-f]{64}$/i.test(process.env.MASTER_KEY || '')) errors.push('MASTER_KEY must be set to 64 hex chars (openssl rand -hex 32). A generated key file is too easy to lose in production.');
   if (!config.mongoUri) errors.push('MONGO_URI is required in production (the JSON file store is for local use only).');
   if (!/^https:\/\//.test(config.appUrl)) errors.push('APP_URL must be the public https:// URL of the app.');
+  if (config.binance.relayUrl && !config.binance.relayKey) errors.push('BINANCE_RELAY_KEY is required when BINANCE_RELAY_URL is set.');
   if (hasBinanceKeys() && !config.binance.testnet) warnings.push('Owner Binance keys are LIVE (real money).');
   warnings.forEach((w) => console.warn(`[config] WARNING: ${w}`));
   if (errors.length) {

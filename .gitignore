@@ -5,3 +5,4 @@ server/.env
 .env.production
 *.log
 server/.env.bak*
+relay/.env

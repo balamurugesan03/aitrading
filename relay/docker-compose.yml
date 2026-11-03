@@ -1,0 +1,24 @@
+# Binance relay for the India VPS. See relay/README.md.
+#   docker compose --env-file .env up -d
+services:
+  relay:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      RELAY_DOMAIN: ${RELAY_DOMAIN:?set RELAY_DOMAIN in .env}
+      ALLOWED_IP: ${ALLOWED_IP:?set ALLOWED_IP in .env}
+      RELAY_KEY: ${RELAY_KEY:?set RELAY_KEY in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  caddy-data:
+  caddy-config:

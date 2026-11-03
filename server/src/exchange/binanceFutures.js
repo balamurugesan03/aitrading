@@ -1,11 +1,15 @@
 // Binance USD-M Futures public data (analytics only - VelocityX does not place futures orders).
 import WebSocket from 'ws';
+import { config } from '../config.js';
+import { relayHeaders } from './binance.js';
 
-const FAPI = 'https://fapi.binance.com';
+const FAPI = () => config.binance.relayUrl || 'https://fapi.binance.com';
+const FSTREAM = () => (config.binance.relayUrl ? `${config.binance.relayUrl.replace(/^http/, 'ws')}/fws` : 'wss://fstream.binance.com');
 
 async function get(pathname, params = {}) {
   const qs = new URLSearchParams(params).toString();
-  const res = await fetch(`${FAPI}${pathname}?${qs}`, { signal: AbortSignal.timeout(10000) });
+  const url = `${FAPI()}${pathname}?${qs}`;
+  const res = await fetch(url, { headers: relayHeaders(url), signal: AbortSignal.timeout(10000) });
   const body = await res.json().catch(() => null);
   if (!res.ok) {
     const err = new Error(body?.msg || `Futures HTTP ${res.status}`);
@@ -31,7 +35,8 @@ let liqRetry = null;
 export function startLiquidationStream() {
   if (liqSocket) return;
   const connect = () => {
-    liqSocket = new WebSocket('wss://fstream.binance.com/ws/!forceOrder@arr');
+    const wsUrl = `${FSTREAM()}/ws/!forceOrder@arr`;
+    liqSocket = new WebSocket(wsUrl, { headers: config.binance.relayUrl ? { 'X-Relay-Key': config.binance.relayKey } : {} });
     liqSocket.on('message', (raw) => {
       try {
         const o = JSON.parse(raw).o;
