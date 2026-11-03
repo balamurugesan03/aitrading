@@ -3,17 +3,17 @@ import { createChart, CrosshairMode, LineStyle } from 'lightweight-charts';
 import { REGIME_STYLE } from './ui.jsx';
 
 const theme = {
-  layout: { background: { color: 'transparent' }, textColor: '#8792ab', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
-  grid: { vertLines: { color: 'rgba(148,163,199,0.06)' }, horzLines: { color: 'rgba(148,163,199,0.06)' } },
+  layout: { background: { color: 'transparent' }, textColor: '#9a8fae', fontFamily: 'JetBrains Mono, monospace', fontSize: 11 },
+  grid: { vertLines: { color: 'rgba(217,182,92,0.05)' }, horzLines: { color: 'rgba(217,182,92,0.05)' } },
   crosshair: { mode: CrosshairMode.Normal },
   rightPriceScale: { borderColor: 'rgba(148,163,199,0.15)' },
   timeScale: { borderColor: 'rgba(148,163,199,0.15)', timeVisible: true, secondsVisible: false },
 };
 
 const OVERLAY_STYLE = {
-  ema9: { color: '#00e5c0', lineWidth: 1 },
-  ema21: { color: '#7c5cff', lineWidth: 1 },
-  ema50: { color: '#f5a524', lineWidth: 1 },
+  ema9: { color: '#e8c872', lineWidth: 1 },
+  ema21: { color: '#9b7bff', lineWidth: 1 },
+  ema50: { color: '#2dd4bf', lineWidth: 1 },
   ema200: { color: '#ff5fa2', lineWidth: 2 },
   bbUpper: { color: 'rgba(110,168,255,0.55)', lineWidth: 1, lineStyle: LineStyle.Dashed },
   bbMid: { color: 'rgba(110,168,255,0.3)', lineWidth: 1, lineStyle: LineStyle.Dotted },
@@ -106,7 +106,7 @@ export function OscillatorChart({ data, kind = 'rsi', height = 150 }) {
     } else {
       const h = c.addHistogramSeries({ priceLineVisible: false });
       h.setData(candles.map((cd, i) => (o.macdHist[i] == null ? null : { time: cd.time, value: o.macdHist[i], color: o.macdHist[i] >= 0 ? 'rgba(22,199,132,0.6)' : 'rgba(234,57,67,0.6)' })).filter(Boolean));
-      c.addLineSeries({ color: '#00e5c0', lineWidth: 1, priceLineVisible: false }).setData(toLine(candles, o.macd));
+      c.addLineSeries({ color: '#e8c872', lineWidth: 1, priceLineVisible: false }).setData(toLine(candles, o.macd));
       c.addLineSeries({ color: '#f5a524', lineWidth: 1, priceLineVisible: false }).setData(toLine(candles, o.macdSignal));
     }
     c.timeScale().fitContent();
@@ -128,7 +128,7 @@ export function EquityChart({ points, height = 300, marker }) {
     s.setData(points.map((p) => ({ time: p.time, value: p.value })));
     if (marker) {
       const t = points.find((p) => p.time >= marker.time)?.time;
-      if (t) s.setMarkers([{ time: t, position: 'aboveBar', color: '#00e5c0', shape: 'arrowDown', text: marker.text }]);
+      if (t) s.setMarkers([{ time: t, position: 'aboveBar', color: '#e8c872', shape: 'arrowDown', text: marker.text }]);
     }
     if (points[0].price) {
       const start = points[0].value;

@@ -126,7 +126,7 @@ export const REGIME_STYLE = {
   SIDEWAYS: { label: 'Sideways', color: '#8792ab' },
   HIGH_VOLATILITY: { label: 'High Volatility', color: '#f5a524' },
   LOW_VOLATILITY: { label: 'Low Volatility', color: '#3987e5' },
-  BREAKOUT: { label: 'Breakout', color: '#00e5c0' },
+  BREAKOUT: { label: 'Breakout', color: '#e8c872' },
   BREAKDOWN: { label: 'Breakdown', color: '#d55181' },
   PANIC: { label: 'Panic', color: '#b4141e' },
 };

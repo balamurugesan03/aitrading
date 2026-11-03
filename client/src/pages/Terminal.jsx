@@ -12,8 +12,8 @@ import { fmtPrice, fmtPct, fmtCompact, fmtQty, tone, baseOf, quoteOf } from '../
 
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
 const OVERLAYS = [
-  ['ema9', 'EMA 9', '#00e5c0'], ['ema21', 'EMA 21', '#7c5cff'], ['ema50', 'EMA 50', '#f5a524'],
-  ['ema200', 'EMA 200', '#ff5fa2'], ['bb', 'Bollinger', '#6ea8ff'], ['levels', 'S/R Levels', '#9aa5bd'], ['regime', 'Regime strip', '#00e5c0'],
+  ['ema9', 'EMA 9', '#e8c872'], ['ema21', 'EMA 21', '#9b7bff'], ['ema50', 'EMA 50', '#2dd4bf'],
+  ['ema200', 'EMA 200', '#ff5fa2'], ['bb', 'Bollinger', '#6ea8ff'], ['levels', 'S/R Levels', '#9aa5bd'], ['regime', 'Regime strip', '#e8c872'],
 ];
 
 function SymbolPicker({ symbol, onPick, exchange }) {
