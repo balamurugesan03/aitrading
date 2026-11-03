@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>VelocityX — User Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #1c1824; --ink-2: #4a4458; --ink-3: #7a7389;
+    --paper: #fffdf8; --cream: #f7f1e3; --line: #e8dfca;
+    --gold: #a87f2e; --gold-2: #c9a24c; --gold-soft: #f6ecd2;
+    --night: #0b0912; --night-2: #17122a; --amethyst: #6d3fd6;
+    --green: #128a5e; --green-soft: #e3f5ec; --red: #c2304a; --red-soft: #fbe7ea; --blue: #2a64c4; --blue-soft: #e6eefb;
+  }
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm;
+    @bottom-left { content: "VelocityX · User Guide"; font: 600 8pt Inter, sans-serif; color: #a89f8a; letter-spacing: 0.08em; }
+    @bottom-right { content: "Page " counter(page); font: 600 8pt Inter, sans-serif; color: #a87f2e; }
+  }
+  @page cover { margin: 0; @bottom-left { content: none; } @bottom-right { content: none; } }
+  @page back { margin: 0; @bottom-left { content: none; } @bottom-right { content: none; } }
+  * { box-sizing: border-box; }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; font-family: Inter, system-ui, sans-serif; font-size: 10.6pt; line-height: 1.6; color: var(--ink); background: var(--paper); }
+  h1, h2, h3, h4 { font-family: Sora, Inter, sans-serif; letter-spacing: -0.015em; color: var(--night-2); margin: 0; }
+  p { margin: 0 0 8px; }
+  b { color: var(--night-2); }
+  .page-break { break-before: page; }
+  .keep { break-inside: avoid; }
+
+  /* ---------- Cover ---------- */
+  .cover { page: cover; height: 297mm; width: 210mm; position: relative; overflow: hidden; color: #f5efe3;
+    background: radial-gradient(120mm 90mm at 85% 8%, rgba(109,63,214,0.45), transparent 70%), radial-gradient(110mm 90mm at 5% 95%, rgba(201,162,76,0.30), transparent 70%), linear-gradient(160deg, #15102a 0%, #0b0912 60%, #07060b 100%); }
+  .cover .grid { position: absolute; left: -40%; right: -40%; bottom: -10mm; height: 120mm; background-image: linear-gradient(rgba(217,182,92,0.22) 1px, transparent 1px), linear-gradient(90deg, rgba(217,182,92,0.22) 1px, transparent 1px); background-size: 14mm 14mm; transform: perspective(90mm) rotateX(62deg); transform-origin: 50% 0; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 35%, #000 60%, transparent); }
+  .cover .inner { position: absolute; inset: 0; padding: 26mm 22mm; display: flex; flex-direction: column; }
+  .cover .logo { display: flex; align-items: center; gap: 12px; }
+  .cover .logo img { width: 22mm; height: 22mm; object-fit: contain; filter: drop-shadow(0 4px 12px rgba(217,182,92,0.4)); }
+  .cover .logo b { font-family: Sora; font-size: 18pt; letter-spacing: 0.16em; color: transparent; background: linear-gradient(110deg, #c39a43, #f9ecc2 40%, #d9b65c 60%, #a87f2e); -webkit-background-clip: text; background-clip: text; }
+  .cover .logo small { display: block; font-size: 7.5pt; letter-spacing: 0.4em; color: #b8955a; font-weight: 600; }
+  .cover .kicker { margin-top: 48mm; font-size: 9pt; letter-spacing: 0.4em; color: #d9b65c; font-weight: 700; text-transform: uppercase; }
+  .cover h1 { color: #fffaf0; font-size: 44pt; line-height: 1.04; font-weight: 800; letter-spacing: -0.03em; margin-top: 6mm; }
+  .cover h1 span { color: transparent; background: linear-gradient(110deg, #f9ecc2, #d9b65c 50%, #b69bff); -webkit-background-clip: text; background-clip: text; }
+  .cover .lead { max-width: 128mm; margin-top: 8mm; font-size: 12.5pt; color: #d8cfe0; line-height: 1.55; }
+  .cover .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10mm; }
+  .cover .chips span { border: 1px solid rgba(217,182,92,0.45); color: #f1dfae; padding: 5px 12px; border-radius: 99px; font-size: 8.5pt; font-weight: 600; background: rgba(217,182,92,0.08); }
+  .cover .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; font-size: 8.5pt; color: #a99fb8; border-top: 1px solid rgba(217,182,92,0.25); padding-top: 6mm; position: relative; }
+  .cover .foot b { color: #f1dfae; }
+
+  /* ---------- Contents ---------- */
+  .toc-title { font-size: 26pt; font-weight: 800; margin-bottom: 4mm; }
+  .eyebrow { font-size: 8pt; font-weight: 700; letter-spacing: 0.3em; text-transform: uppercase; color: var(--gold); }
+  .toc { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-top: 8mm; }
+  .toc .item { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+  .toc .n { font-family: Sora; font-weight: 800; font-size: 16pt; color: var(--gold-2); line-height: 1; min-width: 26px; }
+  .toc .t { font-weight: 700; color: var(--night-2); font-size: 10.5pt; }
+  .toc .d { font-size: 8.8pt; color: var(--ink-3); line-height: 1.45; }
+
+  /* ---------- Chapter opener ---------- */
+  .chapter { break-before: page; }
+  .ch-head { position: relative; border-radius: 16px; padding: 12mm 12mm 10mm; margin-bottom: 8mm; color: #f5efe3; overflow: hidden;
+    background: radial-gradient(70mm 50mm at 95% 0%, rgba(109,63,214,0.5), transparent 70%), linear-gradient(150deg, #1b1430, #0b0912); }
+  .ch-head::after { content: ''; position: absolute; left: 12mm; right: 12mm; bottom: 0; height: 2px; background: linear-gradient(90deg, #d9b65c, transparent); }
+  .ch-head .num { font-family: Sora; font-size: 9pt; letter-spacing: 0.35em; color: #d9b65c; font-weight: 700; }
+  .ch-head h2 { color: #fffaf0; font-size: 26pt; font-weight: 800; margin-top: 3mm; }
+  .ch-head p { color: #cfc5da; margin: 3mm 0 0; font-size: 11pt; max-width: 140mm; }
+
+  /* ---------- Sections ---------- */
+  .sec { margin: 0 0 8mm; }
+  .sec > h3 { font-size: 15pt; font-weight: 700; display: flex; align-items: center; gap: 10px; margin-bottom: 3mm; padding-bottom: 2mm; border-bottom: 1px solid var(--line); }
+  .sec > h3 .ic { width: 26px; height: 26px; border-radius: 8px; display: inline-grid; place-items: center; font-size: 12pt; background: linear-gradient(135deg, #f9ecc2, #c9a24c 60%, #8a6424); color: #2a1d06; box-shadow: 0 2px 6px rgba(138,100,36,0.35); flex-shrink: 0; }
+  h4 { font-size: 11pt; margin: 4mm 0 2mm; color: var(--gold); letter-spacing: 0.02em; }
+  .what { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 2mm 0 3mm; }
+  .what > div { background: var(--cream); border-radius: 10px; padding: 9px 12px; font-size: 9.8pt; }
+  .what small { display: block; font-size: 7.5pt; font-weight: 700; letter-spacing: 0.2em; color: var(--gold); text-transform: uppercase; margin-bottom: 2px; }
+
+  /* Steps */
+  ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 2mm 0 3mm; }
+  ol.steps > li { counter-increment: s; position: relative; padding: 7px 10px 7px 44px; margin-bottom: 6px; background: #fff; border: 1px solid var(--line); border-radius: 10px; break-inside: avoid; }
+  ol.steps > li::before { content: counter(s); position: absolute; left: 9px; top: 7px; width: 25px; height: 25px; border-radius: 50%; display: grid; place-items: center; font: 700 10pt Sora; color: #2a1d06; background: linear-gradient(135deg, #f9ecc2, #c9a24c 60%, #8a6424); box-shadow: 0 2px 5px rgba(138,100,36,0.35); }
+  .btn { display: inline-block; padding: 0 7px; border-radius: 5px; font-weight: 700; font-size: 9pt; background: linear-gradient(135deg, #f3dc9c, #c9a24c); color: #2a1d06; border: 1px solid #b08a3a; white-space: nowrap; }
+  .btn.dark { background: #1b1430; color: #f1dfae; border-color: #3a2e55; }
+  .btn.red { background: #c2304a; color: #fff; border-color: #9a1f36; }
+  .menu { font-weight: 700; color: var(--amethyst); white-space: nowrap; }
+
+  /* Callouts */
+  .note { border-radius: 10px; padding: 9px 12px 9px 40px; margin: 3mm 0; position: relative; font-size: 9.8pt; break-inside: avoid; }
+  .note::before { position: absolute; left: 12px; top: 8px; font-size: 13pt; }
+  .note.tip { background: var(--green-soft); border-left: 4px solid var(--green); } .note.tip::before { content: '💡'; }
+  .note.warn { background: var(--red-soft); border-left: 4px solid var(--red); } .note.warn::before { content: '⚠️'; }
+  .note.info { background: var(--blue-soft); border-left: 4px solid var(--blue); } .note.info::before { content: 'ℹ️'; }
+  .note.gold { background: var(--gold-soft); border-left: 4px solid var(--gold-2); } .note.gold::before { content: '⭐'; }
+  .note b:first-child { display: inline; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 2mm 0 4mm; font-size: 9.6pt; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; break-inside: avoid; }
+  th { background: #1b1430; color: #f1dfae; text-align: left; padding: 7px 10px; font-size: 8pt; letter-spacing: 0.12em; text-transform: uppercase; }
+  td { padding: 7px 10px; border-top: 1px solid var(--line); vertical-align: top; background: #fff; }
+  tr:nth-child(even) td { background: #fcf9f1; }
+
+  /* Mock UI drawings */
+  .mock { border-radius: 12px; background: linear-gradient(160deg, #1b1430, #0b0912); padding: 10px; color: #e9e1f2; font-size: 8.5pt; margin: 3mm 0; break-inside: avoid; box-shadow: 0 6px 18px rgba(20,10,40,0.18); }
+  .mock .bar { display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.05); border: 1px solid rgba(217,182,92,0.25); border-radius: 8px; padding: 6px 8px; }
+  .mock .pill { border: 1px solid rgba(217,182,92,0.4); border-radius: 6px; padding: 2px 7px; color: #f1dfae; white-space: nowrap; }
+  .mock .pill.on { background: linear-gradient(135deg, #f3dc9c, #c9a24c); color: #2a1d06; border-color: transparent; font-weight: 700; }
+  .mock .pill.red { background: #c2304a; border-color: #c2304a; color: #fff; font-weight: 700; }
+  .mock .sp { flex: 1; }
+  .mock .tag { font-size: 7pt; color: #d9b65c; font-weight: 700; letter-spacing: 0.1em; }
+  .callouts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  .callouts div { font-size: 8pt; background: rgba(255,255,255,0.04); border-radius: 6px; padding: 5px 7px; }
+  .callouts b { color: #f1dfae; }
+
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: #fff; break-inside: avoid; }
+  .card h5 { margin: 0 0 4px; font: 700 10.5pt Sora; color: var(--night-2); }
+  .card p { font-size: 9.6pt; margin: 0; color: var(--ink-2); }
+  .card.green { border-top: 4px solid var(--green); } .card.red { border-top: 4px solid var(--red); } .card.gold { border-top: 4px solid var(--gold-2); } .card.violet { border-top: 4px solid var(--amethyst); }
+  ul.clean { padding-left: 18px; margin: 1mm 0 3mm; } ul.clean li { margin-bottom: 3px; }
+  .check li { list-style: none; position: relative; padding-left: 4px; }
+  .check { padding-left: 22px; } .check li::before { content: '☐'; position: absolute; left: -20px; color: var(--gold); font-size: 12pt; line-height: 1.3; }
+  .gloss { columns: 2; column-gap: 14px; }
+  .gloss div { break-inside: avoid; margin-bottom: 8px; padding: 7px 10px; border-radius: 8px; background: #fff; border: 1px solid var(--line); font-size: 9.4pt; }
+  .gloss b { color: var(--gold); display: block; font-family: Sora; }
+
+  /* Back cover */
+  .back { page: back; break-before: page; height: 297mm; width: 210mm; position: relative; color: #e9e1f2; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 30mm;
+    background: radial-gradient(100mm 80mm at 50% 30%, rgba(109,63,214,0.35), transparent 70%), linear-gradient(170deg, #15102a, #07060b); }
+  .back h2 { color: #fffaf0; font-size: 26pt; font-weight: 800; }
+  .back p { max-width: 120mm; color: #cfc5da; font-size: 11pt; }
+  .back .rule { width: 40mm; height: 2px; background: linear-gradient(90deg, transparent, #d9b65c, transparent); margin: 8mm auto; }
+  .back small { color: #8f86a0; font-size: 8pt; max-width: 130mm; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<section class="cover">
+  <div class="grid"></div>
+  <div class="inner">
+    <div class="logo"><img src="../client/public/logo.png" alt="" /><div><b>VELOCITYX</b><small>AI TRADING PLATFORM</small></div></div>
+    <div class="kicker">Official User Guide</div>
+    <h1>Your complete<br/>guide to <span>smart trading</span></h1>
+    <p class="lead">Every screen, every button and every feature explained step by step, in simple words. You do not need any trading or computer experience to follow this guide.</p>
+    <div class="chips"><span>Crypto</span><span>NSE Stocks</span><span>NSE Forex</span><span>NSE Options</span><span>AI Bots</span><span>Copy Trading</span></div>
+    <div class="foot"><div><b>Edition 1.0</b> · November 2026</div><div>For customers &amp; platform owners</div></div>
+  </div>
+</section>
+
+<!-- ================= CONTENTS ================= -->
+<section class="page-break">
+  <div class="eyebrow">Inside this guide</div>
+  <h1 class="toc-title">Contents</h1>
+  <p style="color:var(--ink-2); max-width:150mm">Read Chapters 1 to 3 first. They take about 15 minutes and keep your money safe. After that, jump to any chapter you need.</p>
+  <div class="toc">
+    <div class="item"><div class="n">1</div><div><div class="t">Before You Start</div><div class="d">What VelocityX is, easy words, Paper vs Live, golden safety rules</div></div></div>
+    <div class="item"><div class="n">2</div><div><div class="t">Getting Started</div><div class="d">Create your account, sign in, tour of the screen, install on phone</div></div></div>
+    <div class="item"><div class="n">3</div><div><div class="t">Connect Your Exchange</div><div class="d">Make Binance API keys and connect them safely</div></div></div>
+    <div class="item"><div class="n">4</div><div><div class="t">Watch the Market</div><div class="d">Dashboard, Portfolio AI, AI Terminal, AI Scanner, Market Intel</div></div></div>
+    <div class="item"><div class="n">5</div><div><div class="t">Trading Bots</div><div class="d">Create, start, stop and read your AI bots, strategies explained</div></div></div>
+    <div class="item"><div class="n">6</div><div><div class="t">More Ways to Trade</div><div class="d">Copy Trading, NSE Options, Strategy Library, Marketplace</div></div></div>
+    <div class="item"><div class="n">7</div><div><div class="t">Test &amp; Learn</div><div class="d">Backtest Lab, AI Assistant, Trade Journal, Learning Loop</div></div></div>
+    <div class="item"><div class="n">8</div><div><div class="t">Safety &amp; Your Account</div><div class="d">Risk Manager, Kill Switch, History, 2FA, Telegram, plans</div></div></div>
+    <div class="item"><div class="n">9</div><div><div class="t">For the Platform Owner</div><div class="d">Admin Panel, Super Admin, plans and customer approvals</div></div></div>
+    <div class="item"><div class="n">★</div><div><div class="t">Help Section</div><div class="d">Common problems &amp; fixes, word meanings, safety checklist</div></div></div>
+  </div>
+  <div class="note gold" style="margin-top:10mm"><b>How to read this guide.</b> Numbered gold circles are steps — do them in order. <span class="btn">Gold boxes</span> are buttons you click. <span class="menu">Purple words</span> are menu names on the left side of the screen.</div>
+</section>
+
+<!-- ================= CHAPTER 1 ================= -->
+<section class="chapter">
+  <div class="ch-head"><div class="num">CHAPTER 01</div><h2>Before You Start</h2><p>Five minutes of reading here will save you from the most common and costly mistakes.</p></div>
+
+  <div class="sec">
+    <h3><span class="ic">◆</span>What is VelocityX?</h3>
+    <p>VelocityX is a website (and phone app) that helps you <b>buy and sell</b> crypto coins, Indian stocks, forex and options. It has a built-in <b>AI (artificial intelligence)</b> that studies the market every few minutes and tells you whether it is a good time to buy, sell or wait.</p>
+    <p>You can trade in two ways:</p>
+    <div class="two">
+      <div class="card gold"><h5>✋ By yourself</h5><p>You look at the AI's advice and click Buy or Sell yourself in the <span class="menu">AI Terminal</span>.</p></div>
+      <div class="card violet"><h5>🤖 With a bot</h5><p>You create a "bot" — a robot helper. It watches the market 24 hours a day and trades for you, following safety rules.</p></div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h3><span class="ic">◆</span>Easy words you will see</h3>
+    <table>
+      <tr><th style="width:28%">Word</th><th>Simple meaning</th></tr>
+      <tr><td><b>Coin / Pair</b></td><td>What you trade. <b>BTCUSDT</b> means Bitcoin priced in USDT (a digital dollar).</td></tr>
+      <tr><td><b>Exchange</b></td><td>The market shop where trades really happen, for example <b>Binance</b> or <b>Zerodha</b>.</td></tr>
+      <tr><td><b>Paper mode</b></td><td>Practice with <b>fake money</b>. Nothing real is bought. Safe for learning.</td></tr>
+      <tr><td><b>Live mode</b></td><td>Trading with <b>real money</b> from your exchange account.</td></tr>
+      <tr><td><b>Stop-loss (SL)</b></td><td>An automatic "sell" if the price falls too much. It stops a small loss from becoming a big loss.</td></tr>
+      <tr><td><b>Take-profit (TP)</b></td><td>An automatic "sell" when the price reaches your profit target.</td></tr>
+      <tr><td><b>Bot</b></td><td>A robot helper that trades for you using a strategy.</td></tr>
+      <tr><td><b>Strategy</b></td><td>The rule book the bot follows to decide when to buy and sell.</td></tr>
+      <tr><td><b>PnL</b></td><td>Profit and Loss. <span style="color:var(--green);font-weight:700">Green</span> = profit, <span style="color:var(--red);font-weight:700">Red</span> = loss.</td></tr>
+    </table>
+    <p style="font-size:9pt;color:var(--ink-3)">More words are explained in the Help Section at the end of this guide.</p>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">◆</span>Paper mode vs Live mode</h3>
+    <div class="two">
+      <div class="card green"><h5>📝 Paper (practice)</h5><p>Fake wallet with fake money. Perfect for learning. You can never lose real money here. <b>Always start here.</b></p></div>
+      <div class="card red"><h5>💰 Live (real money)</h5><p>Uses the exchange account you connected. Profits and losses are real. Only use after practising in Paper mode.</p></div>
+    </div>
+    <p style="margin-top:3mm">You switch between them with the <b>Paper / Live</b> button at the top of the screen. When Live is on, a yellow warning bar is shown on every page so you never forget.</p>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">◆</span>The 6 golden safety rules</h3>
+    <ol class="steps">
+      <li><b>Practise first.</b> Use Paper mode for at least 1–2 weeks before using real money.</li>
+      <li><b>Only use money you can afford to lose.</b> Trading always has risk. No AI can promise profit.</li>
+      <li><b>Never turn on "Withdrawals"</b> when you make exchange API keys. VelocityX never needs it.</li>
+      <li><b>Never share</b> your password, API secret or 2FA code with anyone — not even support staff.</li>
+      <li><b>Turn on Two-Factor Authentication (2FA)</b> on your VelocityX account and on your exchange.</li>
+      <li><b>Know the Kill Switch.</b> The red <span class="btn red">Kill Switch</span> button at the top stops everything instantly in an emergency.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 2 ================= -->
+<section class="chapter">
+  <div class="ch-head"><div class="num">CHAPTER 02</div><h2>Getting Started</h2><p>Create your account, sign in and learn where everything is on the screen.</p></div>
+
+  <div class="sec">
+    <h3><span class="ic">1</span>Create your account</h3>
+    <ol class="steps">
+      <li>Open the VelocityX website link given to you, in Chrome or any browser.</li>
+      <li>On the sign-in page click <span class="btn dark">New here? Create an account</span>.</li>
+      <li>Type a <b>Username</b> and a strong <b>Password</b> (at least 8 letters, mix numbers and symbols).</li>
+      <li>Click <span class="btn">Create account</span>. You are now signed in on the <b>Free plan</b>.</li>
+    </ol>
+    <div class="note info"><b>Free plan</b> lets you practise in Paper mode with 1 bot. To trade with real money, upgrade to Pro or Elite (see Chapter 8).</div>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">2</span>Sign in next time</h3>
+    <ol class="steps">
+      <li>Open the website, type your <b>Username</b> and <b>Password</b>.</li>
+      <li>Click <span class="btn">Sign in</span>. If you turned on 2FA, type the 6-digit code from your authenticator app.</li>
+      <li>Forgot your password? Click <span class="btn dark">Forgot password?</span> and follow the steps. A reset code is sent to your Telegram if you linked it.</li>
+    </ol>
+  </div>
+
+  <div class="sec">
+    <h3><span class="ic">3</span>Tour of the screen</h3>
+    <p>The screen has 3 parts: the <b>menu on the left</b>, the <b>top bar</b>, and the <b>main area</b> in the middle.</p>
+    <div class="mock">
+      <div class="tag">TOP BAR</div>
+      <div class="bar" style="margin-top:4px"><b style="color:#fff">Dashboard</b><span style="color:#2fd59b">BTC +2.1%</span><span style="color:#f2546d">ETH −0.4%</span><span class="sp"></span><span class="pill">Binance ▾</span><span class="pill on">Paper</span><span class="pill">Live</span><span class="pill">🔔</span><span class="pill">👤</span><span class="pill red">⛔ Kill Switch</span></div>
+      <div class="callouts">
+        <div><b>Page name</b> — where you are now</div>
+        <div><b>Price strip</b> — live prices of top coins</div>
+        <div><b>Exchange ▾</b> — choose Binance, Bybit, NSE…</div>
+        <div><b>Paper / Live</b> — fake or real money</div>
+        <div><b>🔔 Bell</b> — your alerts and messages</div>
+        <div><b>⛔ Kill Switch</b> — emergency stop</div>
+      </div>
+    </div>
+    <h4>The left menu</h4>
+    <table>
+      <tr><th style="width:22%">Group</th><th>Pages inside</th></tr>
+      <tr><td><b>Overview</b></td><td>Dashboard, Portfolio AI</td></tr>
+      <tr><td><b>Trade</b></td><td>AI Terminal, AI Scanner, Options (NSE), Market Intel</td></tr>
+      <tr><td><b>Automate</b></td><td>Bot Manager, Copy Trading, Strategy Library, Marketplace, Backtest Lab</td></tr>
+      <tr><td><b>Intelligence</b></td><td>AI Assistant, Trade Journal, Learning Loop</td></tr>
+      <tr><td><b>Account</b></td><td>Risk Manager, Trade History, Account &amp; Security, Developer API, Settings</td></tr>
+    </table>
+    <div class="note tip">On a phone, the menu is hidden. Tap the <b>☰</b> button at the top-left, or use the tab bar at the bottom of the screen.</div>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">4</span>Install it on your phone (optional)</h3>
+    <ol class="steps">
+      <li>Open the website on your phone in Chrome (Android) or Safari (iPhone).</li>
+      <li>Android: tap the <b>Install app</b> button at the top, or Chrome menu ⋮ → <b>Add to Home screen</b>.</li>
+      <li>iPhone: tap the Share button → <b>Add to Home Screen</b>.</li>
+      <li>A VelocityX icon appears on your phone. Open it like any normal app.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 3 ================= -->
+<section class="chapter">
+  <div class="ch-head"><div class="num">CHAPTER 03</div><h2>Connect Your Exchange</h2><p>To trade with real money, VelocityX needs a "key" from your exchange. Each customer uses their own key, so trades happen only in your own account.</p></div>
+
+  <div class="note gold"><b>What is an API key?</b> Think of it as a special door key you give to VelocityX. It can place trades for you, but — if you set it up as shown below — it can <b>never withdraw or move your money out</b>. You make two things: an <b>API Key</b> (like a username) and an <b>API Secret</b> (like a password).</div>
+
+  <div class="sec">
+    <h3><span class="ic">A</span>Make your API key on Binance</h3>
+    <ol class="steps">
+      <li>Sign in to <b>binance.com</b> (on a computer is easiest). Your Binance account must be verified (KYC).</li>
+      <li>Click your <b>profile icon</b> → <b>API Management</b>.</li>
+      <li>Click <b>Create API</b> → choose <b>System generated</b> → give it a name like <i>VelocityX</i>.</li>
+      <li>Finish the security check (email / phone / authenticator code).</li>
+      <li>You now see the <b>API Key</b> and <b>Secret Key</b>. <b>Copy both and keep them safe.</b> The Secret is shown only once.</li>
+      <li>Click <b>Edit restrictions</b>. Tick <b>Enable Spot &amp; Margin Trading</b>. Make sure <b>Enable Withdrawals is OFF</b>.</li>
+      <li>Recommended: choose <b>Restrict access to trusted IPs only</b> and enter the server IP your platform owner gives you. Click <b>Save</b>.</li>
+    </ol>
+    <div class="note warn"><b>Never</b> tick "Enable Withdrawals". <b>Never</b> send your Secret Key on WhatsApp, email or phone to anyone.</div>
+    <div class="note tip"><b>Want to practise with Binance first?</b> Make free test keys at <b>testnet.binance.vision</b>. These use fake money on Binance's own test system.</div>
+  </div>
+
+  <div class="sec">
+    <h3><span class="ic">B</span>Add the key in VelocityX</h3>
+    <ol class="steps">
+      <li>In the left menu click <span class="menu">Account &amp; Security</span>.</li>
+      <li>Open the <b>Exchange connections</b> tab.</li>
+      <li>In <b>Exchange</b> choose <b>Binance</b>. (Bybit, OKX and Zerodha are also supported. OKX also needs a <b>Passphrase</b>.)</li>
+      <li>Paste your <b>API key</b> and <b>API secret</b>.</li>
+      <li><b>Testnet / demo account</b> tick box: tick it only if you made test keys. Untick it for real Binance keys.</li>
+      <li>Click <span class="btn">Save connection</span>. Your secret is locked (encrypted) and never shown again.</li>
+      <li>Click <span class="btn dark">Test</span> next to the new connection. You should see <b>"Connected"</b> with your number of assets.</li>
+    </ol>
+    <div class="note info"><b>Zerodha (NSE stocks, forex and options):</b> add your Kite Connect API key and secret the same way, then click <b>Log in to Kite</b>. Kite logins expire every morning around 6 AM, so log in again each trading day.</div>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 4 ================= -->
+<section class="chapter">
+  <div class="ch-head"><div class="num">CHAPTER 04</div><h2>Watch the Market</h2><p>These pages show you what is happening, what you own, and what the AI thinks.</p></div>
+
+  <div class="sec">
+    <h3><span class="ic">▣</span>Dashboard</h3>
+    <div class="what"><div><small>What it is</small>Your home page — a quick summary of everything.</div><div><small>Use it when</small>You open the app and want a quick look.</div></div>
+    <ul class="clean">
+      <li><b>Top boxes:</b> your total money, Realized PnL (profit already taken), Win Rate (% of winning trades) and number of Active AI Bots.</li>
+      <li><b>Fear &amp; Greed Index:</b> shows if people are scared (Fear) or over-excited (Greed). The AI uses this.</li>
+      <li><b>Live AI Activity:</b> what your bots are doing right now.</li>
+      <li><b>Top Markets by Volume</b>, <b>Holdings</b> and <b>Recent Trades</b>.</li>
+    </ul>
+  </div>
+
+  <div class="sec">
+    <h3><span class="ic">◔</span>Portfolio AI</h3>
+    <div class="what"><div><small>What it is</small>A health check of everything you own.</div><div><small>Use it when</small>You want to know if your money is spread out safely.</div></div>
+    <ul class="clean">
+      <li><b>Allocation:</b> a chart of how your money is split between coins and cash.</li>
+      <li><b>Portfolio risk</b> and <b>volatility:</b> how much your total value could swing.</li>
+      <li><b>Correlation Matrix:</b> shows coins that move together (owning many similar coins is risky).</li>
+      <li><b>AI Recommendations</b> and <b>Warnings:</b> simple advice, like "too much money in one coin".</li>
+    </ul>
+  </div>
+
+  <div class="sec">
+    <h3><span class="ic">◧</span>AI Terminal — check a coin and trade by hand</h3>
+    <div class="what"><div><small>What it is</small>A price chart, the AI's advice and a Buy/Sell box.</div><div><small>Use it when</small>You want to study one coin or place a trade yourself.</div></div>
+    <h4>Get the AI's advice</h4>
+    <ol class="steps">
+      <li>Click <span class="menu">AI Terminal</span>. Click the coin name at the top-left and pick or search a coin (e.g. BTC).</li>
+      <li>Choose a <b>timeframe</b> (15m, 1h, 4h, 1d). Bigger timeframes = slower, calmer signals.</li>
+      <li>Click <span class="btn">Run AI Analysis</span>.</li>
+      <li>Read the result: <b style="color:var(--green)">BUY</b>, <b style="color:var(--red)">SELL</b> or <b>WAIT</b>, the <b>probability</b>, the <b>Market Regime</b> (type of market), the suggested <b>Stop-loss</b> and <b>Take-profit</b>, and the <b>Key Drivers</b> (reasons).</li>
+      <li>Look at <b>Risk Manager / Safety gates</b>: if it says <b>Rejected</b>, the safety system does not allow this trade now.</li>
+    </ol>
+    <h4>Place a trade yourself</h4>
+    <ol class="steps">
+      <li>Check the top bar: <b>Paper</b> for practice, <b>Live</b> for real money.</li>
+      <li>In the <b>Place Order</b> box choose <b>Buy</b> or <b>Sell</b>.</li>
+      <li>Type the amount, or tap <b>25% / 50% / 75% / 100%</b> of your balance.</li>
+      <li>Click the Buy/Sell button and confirm. Your trade appears in <span class="menu">Trade History</span>.</li>
+    </ol>
+    <div class="note tip">The chart has extra lines you can turn on or off: EMA lines (trend), Bollinger bands, support/resistance levels and a colour strip that shows the market type.</div>
+  </div>
+
+  <div class="sec">
+    <h3><span class="ic">◎</span>AI Scanner — find the best coins today</h3>
+    <div class="what"><div><small>What it is</small>The AI checks 100+ coins and lists the best chances.</div><div><small>Use it when</small>You don't know which coin to trade.</div></div>
+    <ol class="steps">
+      <li>Click <span class="menu">AI Scanner</span>. Choose a timeframe and how many coins to check (100 or 150).</li>
+      <li>Click <span class="btn">Scan Market</span> and wait about a minute.</li>
+      <li>The <b>Filter Funnel</b> shows how many coins passed each check (enough trading, right movement, good trend, AI score, safety).</li>
+      <li><b>Top Setups</b> lists the best coins with their <b>Confidence</b>, <b>Quality</b> grade (A is best) and strategy. Click a coin to open it in the Terminal.</li>
+    </ol>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">◉</span>Market Intel</h3>
+    <div class="what"><div><small>What it is</small>Extra market information the AI also looks at.</div><div><small>Use it when</small>Before a big trade, to check news and big players.</div></div>
+    <ul class="clean">
+      <li><b>Coin chips + search box:</b> pick any coin. Type a name like <i>PEPE</i> in the box and click <span class="btn">Add</span>.</li>
+      <li><b>Order Flow AI:</b> are big buyers or big sellers more active right now?</li>
+      <li><b>Futures Intelligence:</b> what traders using borrowed money (futures) are doing.</li>
+      <li><b>News AI:</b> latest crypto news marked good or bad.</li>
+      <li><b>Economic Calendar:</b> big events (US inflation, interest rates). The AI trades smaller around these.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 5 ================= -->
+<section class="chapter">
+  <div class="ch-head"><div class="num">CHAPTER 05</div><h2>Trading Bots</h2><p>A bot is your robot trader. It watches the market day and night and follows strict safety rules.</p></div>
+
+  <div class="sec">
+    <h3><span class="ic">🤖</span>Create your first bot</h3>
+    <ol class="steps">
+      <li>Click <span class="menu">Bot Manager</span>, then <span class="btn">New Bot</span>.</li>
+      <li><b>Bot name:</b> any name, e.g. <i>My BTC Bot</i>.</li>
+      <li><b>Exchange</b> and <b>Trading pair:</b> e.g. Binance and <b>BTCUSDT</b>. Any coin on the exchange is allowed.</li>
+      <li><b>Timeframe:</b> how often the bot thinks. <b>1h or 4h</b> is best for beginners.</li>
+      <li><b>AI strategy:</b> choose <b>AI Adaptive</b> (recommended — it changes its plan when the market changes).</li>
+      <li><b>Mode:</b> <b>Paper</b> to practise. Choose <b>Live</b> only when you are ready.</li>
+      <li>Leave the safety numbers as they are for now (see the table below).</li>
+      <li>Click <span class="btn">Create bot</span>, then click <span class="btn">Start</span> on the bot card.</li>
+    </ol>
+  </div>
+
+  <div class="sec">
+    <h4>Bot settings explained</h4>
+    <table>
+      <tr><th style="width:28%">Setting</th><th>Meaning</th><th style="width:18%">Beginner value</th></tr>
+      <tr><td><b>Base risk %</b></td><td>Most you can lose in one trade, as % of your money.</td><td>1%</td></tr>
+      <tr><td><b>Max position %</b></td><td>Most of your money one trade can use.</td><td>25%</td></tr>
+      <tr><td><b>Daily loss limit %</b></td><td>If you lose this much in a day, the bot stops trading until tomorrow.</td><td>5%</td></tr>
+      <tr><td><b>Trailing stop</b></td><td>When price goes up, the stop-loss also moves up to lock in profit.</td><td>ON</td></tr>
+      <tr><td><b>Trailing ATR ×</b></td><td>How far the trailing stop stays behind the price. Bigger = more room.</td><td>2.5</td></tr>
+      <tr><td><b>Signal threshold</b></td><td>How sure the AI must be before buying. Higher = fewer but stronger trades.</td><td>30</td></tr>
+      <tr><td><b>Allow shorts</b></td><td>Lets the bot earn when prices fall (only where the exchange supports it).</td><td>OFF</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h3><span class="ic">🧭</span>How AI Adaptive changes its plan</h3>
+    <p>Every new candle (time period) the AI decides what <b>type of market</b> it is and picks the right plan:</p>
+    <table>
+      <tr><th>Market type</th><th>What the bot does</th></tr>
+      <tr><td>📈 <b>Bull Trend</b> (going up steadily)</td><td>Uses the <b>Trend</b> plan — buys and rides the move up.</td></tr>
+      <tr><td>🚀 <b>Breakout / High volatility</b></td><td>Uses the <b>Breakout</b> plan with a smaller amount.</td></tr>
+      <tr><td>↔️ <b>Sideways / Low volatility</b></td><td>Uses <b>Mean Reversion</b> — buys low, sells high inside the range.</td></tr>
+      <tr><td>📉 <b>Bear Trend / Breakdown / Panic</b></td><td><b>Does not buy.</b> It waits safely until the market is healthy again.</td></tr>
+    </table>
+    <div class="note warn">No strategy wins every trade. Losing trades are normal. The goal is that winners are bigger than losers over time. <b>Profit is never guaranteed.</b></div>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">📋</span>Reading the bot card</h3>
+    <ul class="clean">
+      <li>A <b>green border</b> means the bot is running. Buttons: <span class="btn dark">Stop</span>, <span class="btn">Start / Resume</span>, <span class="btn dark">Logs</span>, edit ✎ and delete 🗑.</li>
+      <li><b>Total PnL</b>, <b>Win rate</b>, and <b>Last signal</b> (what the AI decided last and why).</li>
+      <li>When the bot holds a coin you see <b>Avg entry</b> (buy price), <b>Stop-loss</b> and <b>Take-profit</b>. Click <span class="btn dark">Close position</span> to sell now.</li>
+      <li>The top row shows <b>Bots running</b>, <b>Today realized</b>, <b>Exposure</b> (money in trades) and <b>Drawdown</b> (drop from your best balance).</li>
+      <li><b>Logs</b> show every step in plain words: <span style="color:var(--blue)">info</span>, <span style="color:var(--gold)">trade</span>, <span style="color:var(--green)">profit</span>, <span style="color:var(--red)">loss / error</span>.</li>
+    </ul>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">∑</span>Other bot types</h3>
+    <div class="two">
+      <div class="card gold"><h5>DCA bot</h5><p>Buys a small fixed amount every few candles (e.g. "Buy every N candles"), then sells when the average price is up by your <b>Take profit on avg cost %</b>. Good for long-term saving.</p></div>
+      <div class="card violet"><h5>Grid bot</h5><p>Works in sideways markets: places many small buy-low / sell-high orders inside a price range. It closes itself if the price falls out of the range.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 6 ================= -->
+<section class="chapter">
+  <div class="ch-head"><div class="num">CHAPTER 06</div><h2>More Ways to Trade</h2><p>Copy expert traders, trade Indian options, and choose or build strategies.</p></div>
+
+  <div class="sec">
+    <h3><span class="ic">👥</span>Copy Trading</h3>
+    <div class="what"><div><small>What it is</small>Automatically copy the trades of other users' bots.</div><div><small>Use it when</small>You want to follow a trader with a good record.</div></div>
+    <ol class="steps">
+      <li>Click <span class="menu">Copy Trading</span> and look at the <b>Leaderboard</b> (win rate, profit, followers).</li>
+      <li>Click <span class="btn">Copy</span> next to a trader.</li>
+      <li>Choose <b>Mode</b> (Paper first!), <b>Size multiplier</b> (1 = same size, 0.5 = half) and <b>Max per trade</b> (USDT limit; 0 = no limit).</li>
+      <li>Confirm. Their new trades are now copied to you. See them under <b>Who I copy</b>.</li>
+      <li>Use <span class="btn dark">Pause</span> or <span class="btn dark">Unfollow</span> any time.</li>
+    </ol>
+    <div class="note tip"><b>Share my bots:</b> you can also list your own bots so others can copy you.</div>
+  </div>
+
+  <div class="sec">
+    <h3><span class="ic">◈</span>Options (NSE)</h3>
+    <div class="what"><div><small>What it is</small>Trade NIFTY / BANKNIFTY options with ready-made, limited-risk plans.</div><div><small>Needs</small>A Zerodha connection and a plan that includes Options.</div></div>
+    <ol class="steps">
+      <li>Click <span class="menu">Options (NSE)</span>. Choose an <b>Underlying</b> (e.g. NIFTY 50).</li>
+      <li>Open <b>Chain &amp; builder</b>. Pick a strategy (e.g. a spread), or choose <b>AI chooses (auto)</b>.</li>
+      <li>Look at the payoff chart and the boxes <b>MAX PROFIT</b>, <b>MAX LOSS</b>, <b>BREAKEVEN</b> and <b>CHARGES</b>.</li>
+      <li>Set <b>Lots</b>, <b>Take-profit %</b> and <b>Stop %</b>, then place the trade or click <span class="btn">Create bot</span>.</li>
+      <li>Watch everything in the <b>Positions</b> and <b>Option bots</b> tabs.</li>
+    </ol>
+    <div class="note warn">Options can lose value fast. Keep <b>Defined-risk only</b> turned ON so your maximum loss is always known in advance.</div>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">📚</span>Strategy Library</h3>
+    <p>All built-in strategies with their test results: <b>Win rate</b>, <b>Profit factor</b> (above 1 = earns more than it loses), <b>OOS return</b> (result on data the AI never saw) and <b>Best timeframe</b>. Click <span class="btn">Run Benchmark</span> to test them all again on fresh data.</p>
+    <table>
+      <tr><th style="width:30%">Strategy</th><th>Best for</th></tr>
+      <tr><td><b>AI Adaptive</b> ⭐</td><td>Everyone — switches plan by market type automatically</td></tr>
+      <tr><td><b>EMA Trend / AI Trend</b></td><td>Markets going steadily up</td></tr>
+      <tr><td><b>AI Momentum / AI Breakout</b></td><td>Fast, strong moves</td></tr>
+      <tr><td><b>AI Mean Reversion</b></td><td>Sideways markets</td></tr>
+      <tr><td><b>AI Scalping</b></td><td>Many quick, small trades on short timeframes (advanced)</td></tr>
+      <tr><td><b>AI Volatility / AI Order Flow / AI Neural Net</b></td><td>Advanced users</td></tr>
+      <tr><td><b>DCA</b></td><td>Slow regular buying for long-term holding</td></tr>
+    </table>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">🏪</span>Marketplace — build &amp; share strategies</h3>
+    <ol class="steps">
+      <li>Click <span class="menu">Marketplace</span> → <span class="btn">New strategy</span>.</li>
+      <li>Give it a <b>Name</b> and <b>Description</b>. Move the sliders to choose how much each signal matters (they add up to 100%).</li>
+      <li>Set <b>Stop-loss</b> and <b>Take-profit</b> (in ATR units — bigger number = wider), pick <b>Timeframes</b>, and click <span class="btn">Save strategy</span>.</li>
+      <li>Click <span class="btn">Publish</span> to share it, or <span class="btn">Install</span> someone else's. Rate strategies with ★ stars.</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 7 ================= -->
+<section class="chapter">
+  <div class="ch-head"><div class="num">CHAPTER 07</div><h2>Test &amp; Learn</h2><p>Test ideas on past data before risking money, ask the AI questions, and learn from every trade.</p></div>
+
+  <div class="sec">
+    <h3><span class="ic">⚗</span>Backtest Lab — test before you trade</h3>
+    <div class="what"><div><small>What it is</small>Runs a strategy on years of past prices to see how it would have done.</div><div><small>Use it when</small>Before you start any new bot.</div></div>
+    <ol class="steps">
+      <li>Click <span class="menu">Backtest Lab</span>.</li>
+      <li>Pick up to 5 <b>Coins</b>. Want a coin not shown? Type it in the search box and click <span class="btn">Add</span>.</li>
+      <li>Pick up to 4 <b>Timeframes</b> and a <b>Strategy</b>.</li>
+      <li>Leave the other numbers as they are (they include real fees and slippage) and click <span class="btn">Run Backtest</span>.</li>
+      <li>Read the results (table below). Check the <b>Trades</b>, <b>Walk-forward</b>, <b>Monte Carlo</b> and <b>By regime</b> tabs for more detail.</li>
+    </ol>
+    <table>
+      <tr><th style="width:36%">Result</th><th>What is good</th></tr>
+      <tr><td><b>Avg out-of-sample return</b></td><td>Above 0% — it made money on data it never trained on.</td></tr>
+      <tr><td><b>Profitable out-of-sample</b></td><td>The more markets profitable, the better.</td></tr>
+      <tr><td><b>Probability of loss</b></td><td>Lower is better (from Monte Carlo — thousands of "what if" runs).</td></tr>
+      <tr><td><b>Win rate / Profit factor</b></td><td>Profit factor above 1.2 is good.</td></tr>
+    </table>
+    <div class="note info">Good past results do not promise future profit, but bad past results are a strong warning. Never go Live with a strategy that loses in the backtest.</div>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">💬</span>AI Assistant</h3>
+    <p>Chat with the AI in normal words, like a messaging app. Try questions like:</p>
+    <ul class="clean">
+      <li>"Should I buy Bitcoin today?" · "Why did my bot lose money yesterday?"</li>
+      <li>"Explain stop-loss in simple words." · "Which of my bots is doing best?"</li>
+    </ul>
+    <p>Type in the box at the bottom and press Enter. Available on plans that include the AI Assistant.</p>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">📓</span>Trade Journal</h3>
+    <p>Every finished trade is saved automatically with notes: why it was opened, the market type, and the best and worst price during the trade. At the top, <b>AI Insights</b> and <b>Most Common Mistakes</b> show patterns in your losing trades, so you can avoid them next time.</p>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">🧠</span>Learning Loop (advanced)</h3>
+    <p>The AI keeps checking itself: is it as accurate as it claims? Here you can <b>Train New Model Candidate</b> on chosen markets, compare results in the <b>Model Registry</b>, and promote a better model only if it passes the <b>Promotion gates</b> (safety tests). Most users can leave this page alone.</p>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 8 ================= -->
+<section class="chapter">
+  <div class="ch-head"><div class="num">CHAPTER 08</div><h2>Safety &amp; Your Account</h2><p>Control your risk, stop everything in an emergency, and keep your account secure.</p></div>
+
+  <div class="sec">
+    <h3><span class="ic">🛡</span>Risk Manager</h3>
+    <ul class="clean">
+      <li><b>Risk Limits:</b> set the rules every bot must follow — max exposure, daily loss limit, minimum signal quality and more.</li>
+      <li><b>Emergency Protection:</b> the system pauses bots on its own after repeated exchange errors, stale data or abnormal prices.</li>
+      <li><b>System Health:</b> exchange connection, speed (latency) and last check time.</li>
+      <li><b>Live stats:</b> Running bots, Realized today, Exposure and Drawdown from peak.</li>
+    </ul>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">⛔</span>The Kill Switch — emergency stop</h3>
+    <div class="note warn" style="margin-top:0">Use it if the market crashes, something looks wrong, or you are not sure. Pressing it will: <b>stop all bots, cancel open orders, close your positions, and turn off auto-trading.</b></div>
+    <ol class="steps">
+      <li>Click the red <span class="btn red">Kill Switch</span> at the top-right (also on the Risk Manager page).</li>
+      <li>Confirm. A red bar <b>"Auto-trading halted"</b> appears on every page.</li>
+      <li>When it is safe again, click <span class="btn">Resume</span> in the same place.</li>
+    </ol>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">🧾</span>Trade History</h3>
+    <p>A full list of every trade, with filters <b>All / Paper / Live</b>. At the top: <b>Total trades</b>, <b>Win rate</b>, <b>Realized PnL</b> and <b>Fees paid</b>. Useful for your records and taxes.</p>
+  </div>
+
+  <div class="sec">
+    <h3><span class="ic">👤</span>Account &amp; Security</h3>
+    <h4>Turn on Two-Factor Authentication (2FA) — strongly recommended</h4>
+    <ol class="steps">
+      <li>Install <b>Google Authenticator</b> or <b>Authy</b> on your phone.</li>
+      <li>Go to <span class="menu">Account &amp; Security</span> → <b>Two-factor auth</b> tab.</li>
+      <li>Scan the QR code with the app, type the <b>6-digit code</b> and confirm.</li>
+      <li>From now on, sign-in also asks for the code from your phone.</li>
+    </ol>
+    <h4>Get alerts on Telegram</h4>
+    <ol class="steps">
+      <li>In Telegram, create a bot with <b>@BotFather</b> and copy its <b>Bot token</b>. Find your <b>Chat ID</b> (e.g. using @userinfobot).</li>
+      <li>In the <b>Telegram alerts</b> tab, paste the Bot token and Chat ID, and save.</li>
+      <li>You will get messages for trades, profits, losses and warnings. Password-reset codes also come here.</li>
+    </ol>
+    <h4>Upgrade your plan</h4>
+    <ol class="steps">
+      <li>Open the <b>Subscription</b> tab to see your plan and the other plans.</li>
+      <li>Click <span class="btn">Request Pro</span> (or Elite) and pay as told by the platform owner.</li>
+      <li>When the owner approves, your plan becomes active and you get a notification.</li>
+    </ol>
+    <table>
+      <tr><th>Plan</th><th>Bots</th><th>Live trading</th><th>AI chat</th><th>Options</th><th>Copy trading</th></tr>
+      <tr><td><b>Free</b></td><td>1</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+      <tr><td><b>Pro</b></td><td>10</td><td>✔</td><td>✔</td><td>✔</td><td>✔</td></tr>
+      <tr><td><b>Elite</b></td><td>100</td><td>✔</td><td>✔</td><td>✔</td><td>✔</td></tr>
+    </table>
+    <p style="font-size:9pt;color:var(--ink-3)">Default plans shown. Your platform owner may change prices and features.</p>
+    <h4>Other tabs</h4>
+    <ul class="clean">
+      <li><b>Profile</b> and <b>Password &amp; sessions</b> — change name and password, sign out other devices.</li>
+      <li><b>API keys</b> — for developers who connect their own programs (see <span class="menu">Developer API</span>).</li>
+      <li><b>Activity log</b> — every sign-in and important change, so you can spot anything strange.</li>
+    </ul>
+  </div>
+
+  <div class="sec keep">
+    <h3><span class="ic">⚙</span>Settings</h3>
+    <p>See connected exchanges, your <b>Paper Trading Wallet</b> (click <b>Reset paper wallet</b> to restart your practice money), Claude AI status, server information and the <b>Add to Home screen</b> option for phones.</p>
+  </div>
+</section>
+
+<!-- ================= CHAPTER 9 ================= -->
+<section class="chapter">
+  <div class="ch-head"><div class="num">CHAPTER 09</div><h2>For the Platform Owner</h2><p>Only the owner sees these pages. Customers can skip this chapter.</p></div>
+
+  <div class="sec">
+    <h3><span class="ic">👑</span>Admin Panel (owner login)</h3>
+    <ul class="clean">
+      <li><b>Overview:</b> system health, bots running and AI model accuracy across the platform.</li>
+      <li><b>Bots</b> and <b>Trades:</b> see all customers' bots and trades.</li>
+      <li><b>Errors &amp; audit:</b> bot errors and an audit log of important actions.</li>
+      <li><b>Platform halt:</b> click <span class="btn red">Halt all trading</span> to stop trading for <b>every</b> customer (with a reason they will see). Click <span class="btn">Resume platform trading</span> to undo.</li>
+      <li><b>White-label branding:</b> change App name, Tagline, colours, logo text and support email, then <span class="btn">Save branding</span>.</li>
+    </ul>
+  </div>
+
+  <div class="sec">
+    <h3><span class="ic">💼</span>Super Admin — plans &amp; customers</h3>
+    <p>Open <b>/superadmin</b> on your website and sign in with the separate Super Admin username and password (this login cannot trade).</p>
+    <h4>Approve a customer's upgrade</h4>
+    <ol class="steps">
+      <li>Open the <b>Requests</b> tab. Each pending upgrade request is listed.</li>
+      <li>Check you received the payment, then click <span class="btn">Approve</span> (add a payment note / reference).</li>
+      <li>The customer is notified and their plan starts immediately.</li>
+    </ol>
+    <h4>Other jobs</h4>
+    <ul class="clean">
+      <li><b>Plans:</b> create or edit plans — name, price, billing period, trial days and features (max bots, live trading, AI chat, options, copy trading).</li>
+      <li><b>Users &amp; subscriptions:</b> <span class="btn">Assign plan</span> manually, <span class="btn dark">Cancel sub</span>, or activate users.</li>
+      <li><b>Payments:</b> history of all payments. <b>Overview:</b> active subscribers, paid subscriptions and estimated monthly revenue (MRR).</li>
+      <li><b>Account:</b> change the Super Admin password.</li>
+    </ul>
+    <div class="note warn"><b>Server safety:</b> keep the <b>MASTER_KEY</b> in the server settings backed up safely. It locks all customers' API secrets. If it is lost, every customer must add their keys again.</div>
+  </div>
+</section>
+
+<!-- ================= HELP ================= -->
+<section class="chapter">
+  <div class="ch-head"><div class="num">HELP SECTION</div><h2>Problems &amp; Quick Fixes</h2><p>The most common questions, answered simply.</p></div>
+  <table>
+    <tr><th style="width:38%">Problem</th><th>What to do</th></tr>
+    <tr><td><b>"Cannot reach the server"</b> red bar</td><td>The website's server is off or your internet is down. Check your internet; if it continues, contact your platform owner.</td></tr>
+    <tr><td><b>"No Binance API keys connected"</b></td><td>Add your keys in Account &amp; Security → Exchange connections (Chapter 3).</td></tr>
+    <tr><td>Connection <b>Test</b> fails</td><td>Check you copied the full key and secret with no spaces; the Testnet box matches your key type; trading is enabled on Binance; and the server IP is in your Binance IP list.</td></tr>
+    <tr><td><b>"…not included in your Free plan"</b></td><td>That feature needs Pro or Elite. Request an upgrade in the Subscription tab.</td></tr>
+    <tr><td>Bot is running but <b>not buying</b></td><td>This is often correct. The market may be in Bear/Panic mode, the signal is not strong enough, the daily loss limit was hit, or the Kill Switch is on. Read the bot's <b>Logs</b> for the exact reason.</td></tr>
+    <tr><td><b>"Auto-trading halted"</b> red bar</td><td>The Kill Switch or a platform halt is on. Click <b>Resume</b> when safe (platform halts can only be lifted by the owner).</td></tr>
+    <tr><td><b>"Binance is not responding"</b></td><td>The exchange is busy or down. Bots wait automatically and continue when it comes back.</td></tr>
+    <tr><td>Zerodha / NSE stopped working</td><td>Kite logins expire every morning. Go to Exchange connections and click <b>Log in to Kite</b> again.</td></tr>
+    <tr><td>Forgot password</td><td>Click "Forgot password?" on the sign-in page. The code comes by Telegram if linked; otherwise contact your platform owner.</td></tr>
+    <tr><td>I lost money on a trade</td><td>Losses are a normal part of trading. Check the Trade Journal to learn why, lower your Base risk %, and keep practising in Paper mode.</td></tr>
+  </table>
+
+  <div class="sec" style="margin-top:8mm">
+    <h3><span class="ic">Aa</span>Word meanings (glossary)</h3>
+    <div class="gloss">
+      <div><b>ATR</b>How much a price normally moves in one candle. Used to set safe stop distances.</div>
+      <div><b>Backtest</b>Testing a strategy on past prices.</div>
+      <div><b>Candle / Timeframe</b>One block of time on the chart (e.g. 1h = one hour).</div>
+      <div><b>Drawdown</b>How far your balance dropped from its highest point.</div>
+      <div><b>EMA</b>An average price line that shows the trend direction.</div>
+      <div><b>Exposure</b>How much of your money is in open trades right now.</div>
+      <div><b>Fear &amp; Greed</b>A 0–100 score of market mood.</div>
+      <div><b>Futures</b>Trading with borrowed money. Higher risk.</div>
+      <div><b>Leverage</b>Borrowed money that makes profits and losses bigger.</div>
+      <div><b>Long / Short</b>Long = earn when price rises. Short = earn when price falls.</div>
+      <div><b>Order book</b>The list of people waiting to buy and sell at each price.</div>
+      <div><b>Out-of-sample (OOS)</b>Test data the AI never saw while learning. The honest test.</div>
+      <div><b>Profit factor</b>Total wins ÷ total losses. Above 1 means profitable.</div>
+      <div><b>Regime</b>The type of market right now: trend, sideways, panic, etc.</div>
+      <div><b>Slippage</b>Small difference between expected price and actual price.</div>
+      <div><b>Spot</b>Buying the real coin with your own money, no borrowing.</div>
+      <div><b>Testnet</b>Exchange practice system with fake money.</div>
+      <div><b>USDT</b>A digital coin that tries to stay equal to 1 US dollar.</div>
+      <div><b>Volatility</b>How much and how fast the price jumps around.</div>
+      <div><b>Win rate</b>Percent of trades that ended in profit.</div>
+    </div>
+  </div>
+</section>
+
+<section class="page-break">
+  <div class="eyebrow">Print this page and keep it near you</div>
+  <h1 class="toc-title" style="margin-top:2mm">Safety Checklist</h1>
+  <div class="two" style="margin-top:6mm">
+    <div class="card gold"><h5>Before going Live</h5>
+      <ul class="check">
+        <li>I practised in Paper mode for at least 1–2 weeks</li>
+        <li>I ran a Backtest and the result was positive</li>
+        <li>2FA is ON for VelocityX and for my exchange</li>
+        <li>My API key has Withdrawals turned OFF</li>
+        <li>My API key is limited to the server IP</li>
+        <li>I set Base risk to 1% or less</li>
+        <li>I know where the Kill Switch is</li>
+        <li>I only use money I can afford to lose</li>
+      </ul>
+    </div>
+    <div class="card violet"><h5>Every day / week</h5>
+      <ul class="check">
+        <li>Check the Dashboard and bot Logs once a day</li>
+        <li>Read Telegram alerts</li>
+        <li>Zerodha users: log in to Kite each trading day</li>
+        <li>Look at the Trade Journal once a week</li>
+        <li>Check Portfolio AI warnings</li>
+        <li>Check the Activity log for unknown sign-ins</li>
+        <li>Never share my password, secret or 2FA code</li>
+        <li>When unsure — press the Kill Switch</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note warn" style="margin-top:8mm"><b>Risk notice.</b> Trading crypto, stocks, forex and options carries a high level of risk and can result in the loss of some or all of your money. The AI gives probabilities, not promises. Past performance does not guarantee future results. VelocityX does not give financial advice. Please trade responsibly.</div>
+</section>
+
+<section class="back">
+  <img src="../client/public/logo.png" alt="" style="width:26mm;height:26mm;object-fit:contain;filter:drop-shadow(0 6px 16px rgba(217,182,92,0.45))" />
+  <h2 style="margin-top:8mm">Trade smart. Trade safe.</h2>
+  <div class="rule"></div>
+  <p>Start in Paper mode, let the AI do the hard work, and keep your risk small. Your platform owner is here to help if you get stuck.</p>
+  <small style="margin-top:14mm">VelocityX AI Trading Platform · User Guide Edition 1.0 · November 2026</small>
+</section>
+
+</body>
+</html>
