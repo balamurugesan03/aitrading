@@ -7,7 +7,8 @@ import { killSwitch, stopBot } from '../bot/engine.js';
 import { audit, notify } from '../notify.js';
 
 const r = Router();
-const wrap = (fn) => (req, res) => fn(req, res).catch((err) => res.status(err.status || 500).json({ error: err.message }));
+// An exchange rejecting its API key replies 401 - never pass that on: the client treats 401 as an expired session and signs out.
+const wrap = (fn) => (req, res) => fn(req, res).catch((err) => res.status(err.status === 401 ? 502 : err.status || 500).json({ error: err.message }));
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 r.use('/admin', (req, res, next) => (req.user ? requireAdmin(req, res, next) : res.status(401).json({ error: 'Please sign in' })));
 

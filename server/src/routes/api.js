@@ -30,7 +30,8 @@ import { audit } from '../notify.js';
 import { assertFeature, assertBotSlot } from '../billing/plans.js';
 
 const r = Router();
-const wrap = (fn) => (req, res) => fn(req, res).catch((err) => res.status(err.status && err.status < 600 ? err.status : 500).json({ error: err.message, checks: err.checks, code: err.code }));
+// An exchange rejecting its API key replies 401 - never pass that on: the client treats 401 as an expired session and signs out.
+const wrap = (fn) => (req, res) => fn(req, res).catch((err) => res.status(err.status === 401 ? 502 : err.status && err.status < 600 ? err.status : 500).json({ error: err.message, checks: err.checks, code: err.code }));
 const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 r.use((req, res, next) => (req.user ? next() : res.status(401).json({ error: 'Please sign in' })));
 
