@@ -207,7 +207,7 @@ const pickBot = (body, user) => {
   if (out.allowShort !== undefined) {
     out.allowShort = Boolean(out.allowShort);
     const exId = out.exchange || body.exchange || 'binance';
-    if (out.allowShort && !EXCHANGES[exId]?.canShort) throw bad(`${EXCHANGES[exId]?.name || exId} cannot be sold short - shorts are available on NSE forex futures`);
+    if (out.allowShort && !EXCHANGES[exId]?.canShort) throw bad(`${EXCHANGES[exId]?.name || exId} cannot be sold short - shorts are available on NSE forex and NSE futures`);
   }
   ['threshold', 'riskPct', 'maxPositionPct', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct'].forEach((k) => out[k] !== undefined && (out[k] = Number(out[k])));
   return out;
@@ -364,7 +364,7 @@ r.post('/portfolio/reset', wrap(async (req, res) => {
     for (const l of await db.logs.find({ userId })) if (!l.botId || paperBotIds.has(l.botId)) await db.logs.remove(l._id);
   }
   const s = await getSettings(userId);
-  await updateSettings(userId, { peakEquity: { ...s.peakEquity, [{ crypto: 'paper', fx: 'paperFx', stocks: 'paperStocks' }[account]]: amount } });
+  await updateSettings(userId, { peakEquity: { ...s.peakEquity, [{ crypto: 'paper', fx: 'paperFx', stocks: 'paperStocks', futures: 'paperFutures' }[account]]: amount } });
   await audit(userId, 'paper.reset', { amount, clearHistory: Boolean(req.body?.clearHistory) }, req);
   res.json(await resetPaperWallet(userId, amount, e));
 }));

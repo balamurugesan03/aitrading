@@ -17,6 +17,7 @@ const WALLETS = {
   fx: { kind: 'paper-inr', quote: 'INR', start: () => config.paperFxStartBalance },
   stocks: { kind: 'paper-nse', quote: 'INR', start: () => config.paperStocksStartBalance },
   options: { kind: 'paper-nfo', quote: 'INR', start: () => config.paperOptionsStartBalance },
+  futures: { kind: 'paper-nfut', quote: 'INR', start: () => config.paperFuturesStartBalance },
 };
 export const walletFor = (exchange) => WALLETS[accountOf(exchange)];
 
@@ -31,10 +32,15 @@ export async function getPaperBalances(userId, exchange = 'binance') {
   return (await wallet(userId, exchange)).balances;
 }
 
+// Margin blocked per symbol (rupees) in a margin paper account (futures); empty for fully funded accounts.
+export async function getPaperMargin(userId, exchange) {
+  return (await wallet(userId, exchange)).margin || {};
+}
+
 export async function resetPaperWallet(userId, amount, exchange = 'binance') {
   const W = walletFor(exchange);
   const w = await wallet(userId, exchange);
-  return db.wallet.update(w._id, { balances: { [W.quote]: amount ?? W.start() } });
+  return db.wallet.update(w._id, { balances: { [W.quote]: amount ?? W.start() }, margin: {} });
 }
 
 // Walks one side of the book. For BUY `amount` is quote to spend; for SELL it is base quantity.
@@ -79,6 +85,7 @@ export async function paperOrder({ userId, exchange = 'binance', side, symbol, b
   const w = await wallet(userId, exchange);
   const b = { ...w.balances };
   if (short && !adapter.canShort) throw new Error(`${adapter.name} cannot be sold short`);
+  if (adapter.margin) return marginOrder({ adapter, w, b, book, mid, side, symbol, base, quote, quoteAmount, quantity, exchange, latency, short });
   if (adapter.lotUnits) return lotOrder({ adapter, w, b, book, mid, side, base, quote, quoteAmount, quantity, exchange, latency, short });
 
   if (side === 'BUY') {
@@ -164,4 +171,67 @@ async function lotOrder({ adapter, w, b, book, mid, side, base, quote, quoteAmou
     qty: units, price, cost: side === 'BUY' ? gross + fee : gross - fee, fee,
     sim: { exchange, latencyMs: latency, midPrice: mid, slippageBps: +(((side === 'BUY' ? price - mid : mid - price) / mid) * 10000).toFixed(2), levels: walk.levelsUsed, partial: false, lots: units / lot },
   };
+}
+
+// Margin instruments (NSE futures): whole lots of a per-contract lot size; a position blocks marginRate x notional
+// instead of its full notional. Cash carries the signed flows exactly like the lot wallet (a long's purchase is
+// paid from cash, which may go negative; a short's sale proceeds sit in cash), so equity is still
+// cash + signed units x price. `margin` records what each open position blocks; free margin = equity - blocked.
+// One direction per symbol: open the other side only after closing this one.
+async function marginOrder({ adapter, w, b, book, mid, side, symbol, base, quote, quoteAmount, quantity, exchange, latency, short = false }) {
+  const lot = await adapter.lotFor(symbol);
+  const rate = adapter.marginRateOf(symbol);
+  const levels = side === 'BUY' ? book.asks : book.bids;
+  const margin = { ...(w.margin || {}) };
+  const held = b[base] || 0; // signed units
+  const opening = short ? side === 'SELL' : side === 'BUY';
+  let units;
+  let have = 0;
+  if (opening) {
+    if (short ? held > 0 : held < 0) throw new Error(`Close the ${base} ${held > 0 ? 'long' : 'short'} before opening a ${short ? 'short' : 'long'}`);
+    const px = levels[0][0];
+    const free = (await paperEquity(adapter, b, { [base]: mid })) - Object.values(margin).reduce((s, v) => s + v, 0);
+    const lotNotional = px * lot;
+    const wanted = Math.floor(quoteAmount / (lotNotional * 1.001));
+    const affordable = Math.floor(free / (lotNotional * rate * 1.001 + adapter.feeFor(lotNotional, side)));
+    const lots = Math.min(wanted, affordable);
+    if (wanted < 1) throw new Error(`Order is smaller than 1 lot of ${base} futures (${lot} units, about ${quote} ${Math.round(lotNotional).toLocaleString('en-IN')} notional)`);
+    if (lots < 1) throw new Error(`Not enough free margin for 1 lot of ${base}: needs about ${quote} ${Math.round(lotNotional * rate).toLocaleString('en-IN')}, free ${quote} ${Math.round(Math.max(0, free)).toLocaleString('en-IN')}`);
+    units = lots * lot;
+  } else {
+    have = short ? Math.max(0, -held) : Math.max(0, held);
+    units = Math.floor(Math.min(quantity, have) / lot + 1e-9) * lot;
+    if (units < lot) throw new Error(`No ${base} ${short ? 'short' : 'long'} futures position to ${short ? 'cover' : 'sell'}`);
+  }
+  const walk = walkBook(levels, 'SELL', units); // quantity-based walk for both sides
+  let gross = walk.cost;
+  if (walk.remaining > 0) gross += walk.remaining * levels.at(-1)[0] * (side === 'BUY' ? 1.0001 : 0.9999); // beyond the 5 visible levels
+  const fee = adapter.feeFor(gross, side);
+  b[base] = held + (side === 'BUY' ? units : -units);
+  if (Math.abs(b[base]) < 1e-9) delete b[base];
+  b[quote] = (b[quote] || 0) + (side === 'SELL' ? gross - fee : -(gross + fee));
+  if (opening) margin[base] = (margin[base] || 0) + gross * rate;
+  else if (b[base] === undefined) delete margin[base];
+  else margin[base] = (margin[base] || 0) * (1 - units / have);
+  await db.wallet.update(w._id, { balances: b, margin });
+  const price = gross / units;
+  return {
+    qty: units, price, cost: side === 'BUY' ? gross + fee : gross - fee, fee,
+    sim: { exchange, latencyMs: latency, midPrice: mid, slippageBps: +(((side === 'BUY' ? price - mid : mid - price) / mid) * 10000).toFixed(2), levels: walk.levelsUsed, partial: false, lots: units / lot, marginBlocked: opening ? +(gross * rate).toFixed(2) : 0 },
+  };
+}
+
+// Paper equity of a lot/margin wallet: cash + signed units x price (`known` supplies prices already at hand).
+async function paperEquity(adapter, balances, known = {}) {
+  const held = Object.keys(balances).filter((k) => k !== 'INR' && balances[k] !== 0 && known[k] === undefined);
+  const tickers = held.length ? await adapter.getTickers(held) : [];
+  const px = (a) => known[a] ?? tickers.find((t) => t.symbol === a)?.price;
+  let equity = balances.INR || 0;
+  for (const [a, u] of Object.entries(balances)) {
+    if (a === 'INR' || !u) continue;
+    const p = px(a);
+    if (!(p > 0)) throw new Error(`No price for ${a} - cannot value the futures account`);
+    equity += u * p;
+  }
+  return equity;
 }

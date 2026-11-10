@@ -4,7 +4,7 @@
 import { db } from '../db/index.js';
 import { getSettings, updateSettings } from './safety.js';
 import { valuePortfolio, correlation, fxCorrelation } from '../ai/portfolio.js';
-import { symbolInfo, isFx, accountOf } from '../exchange/index.js';
+import { symbolInfo, isFx, isMargin, marginRateFor, accountOf } from '../exchange/index.js';
 import { REGIMES } from '../ai/regime.js';
 import { baseAsset } from '../ai/util.js';
 import { startOfDay } from './risk.js';
@@ -41,7 +41,7 @@ export async function accountState(user, mode, exchange = 'binance') {
   const settings = await getSettings(user._id);
   const account = accountOf(exchange);
   const pf = await valuePortfolio(user, mode, exchange);
-  const peakKey = { crypto: mode, fx: `${mode}Fx`, stocks: `${mode}Stocks` }[account];
+  const peakKey = { crypto: mode, fx: `${mode}Fx`, stocks: `${mode}Stocks`, futures: `${mode}Futures` }[account];
   const peak = Math.max(settings.peakEquity[peakKey] || 0, pf.total);
   if (peak > (settings.peakEquity[peakKey] || 0)) await updateSettings(user._id, { peakEquity: { [peakKey]: peak } });
   const trades = (await db.trades.find({ mode, userId: user._id })).filter((t) => accountOf(t.exchange) === account);
@@ -53,6 +53,7 @@ export async function accountState(user, mode, exchange = 'binance') {
     exposurePct: 100 - pf.stablePct,
     holdings: pf.assets.filter((a) => !a.stable && a.value > 5),
     realizedToday,
+    margin: pf.margin || null, // margin accounts: { marginUsed, notional, freeMargin, leverage }; cash is then the free margin
   };
 }
 
@@ -139,12 +140,22 @@ export async function evaluateRisk(signal, { user, bot = null, mode = 'paper', a
   // ---- Position size ----
   const riskAmount = acct.equity * (risk / 100);
   let notional = signal.expectedRiskPct > 0 ? riskAmount / (signal.expectedRiskPct / 100) : 0;
-  const maxPos = acct.equity * ((bot?.maxPositionPct ?? 25) / 100);
-  const headroom = Math.max(0, acct.equity * (R.maxExposurePct / 100) - (acct.equity * acct.exposurePct) / 100);
-  notional = Math.min(notional, maxPos, acct.cash * 0.995, headroom);
   const info = await symbolInfo(exchange, signal.symbol).catch(() => null);
+  // Margin accounts (futures) count margin, not notional: max position %, free cash and the exposure limit all
+  // apply to the margin a position blocks, so each is converted to notional by dividing by the margin rate.
+  // The stop-based size above already limits the loss to `risk`% of equity; the leverage cap bounds the rest.
+  const margin = isMargin(exchange);
+  const rate = margin ? marginRateFor(exchange, signal.symbol, info) : 1;
+  const maxPos = (acct.equity * ((bot?.maxPositionPct ?? 25) / 100)) / rate;
+  const headroom = Math.max(0, acct.equity * (R.maxExposurePct / 100) - (acct.equity * acct.exposurePct) / 100) / rate;
+  const leverageRoom = margin ? Math.max(0, acct.equity * R.maxLeverage - (acct.margin?.notional || 0)) : Infinity;
+  notional = Math.min(notional, maxPos, (acct.cash * 0.995) / rate, headroom, leverageRoom);
   const minNotional = Math.max(10, info?.minNotional || 0);
-  gate('Exposure', headroom >= minNotional, `Exposure ${acct.exposurePct.toFixed(1)}% (max ${R.maxExposurePct}%)`);
+  gate('Exposure', headroom >= minNotional, `${margin ? 'Margin used' : 'Exposure'} ${acct.exposurePct.toFixed(1)}% (max ${R.maxExposurePct}%)`);
+  if (margin) {
+    const lev = acct.equity > 0 ? ((acct.margin?.notional || 0) + notional) / acct.equity : Infinity;
+    gate('Leverage', leverageRoom >= minNotional, `${lev.toFixed(2)}x after this trade (max ${R.maxLeverage}x), margin ${(rate * 100).toFixed(0)}% of notional`);
+  }
   gate('Position size', notional >= minNotional, `${notional.toFixed(2)} ${acct.currency || 'USDT'} (min ${minNotional.toFixed(2)}${info?.stepSize > 1 ? ' = 1 lot' : ''})`);
 
   const approved = gates.every((g) => g.pass);
@@ -154,7 +165,7 @@ export async function evaluateRisk(signal, { user, bot = null, mode = 'paper', a
     rejectedBy: gates.filter((g) => !g.pass).map((g) => g.name),
     finalRiskPct: +risk.toFixed(3),
     steps, gates,
-    position: approved ? { notional: +notional.toFixed(2), riskAmount: +riskAmount.toFixed(2), qty: notional / signal.price } : null,
+    position: approved ? { notional: +notional.toFixed(2), riskAmount: +riskAmount.toFixed(2), qty: notional / signal.price, ...(margin && { margin: +(notional * rate).toFixed(2), marginRate: rate }) } : null,
     account: { currency: acct.currency || 'USDT', equity: +acct.equity.toFixed(2), drawdownPct: +acct.drawdownPct.toFixed(2), exposurePct: +acct.exposurePct.toFixed(1), openPositions: openCount },
     strategyPerformance: perf,
   };

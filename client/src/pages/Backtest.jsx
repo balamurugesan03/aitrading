@@ -16,6 +16,9 @@ const FX_TFS = ['5m', '15m', '1h', '1d'];
 const CRYPTO_DEFAULTS = { symbols: ['BTCUSDT'], intervals: ['1h'], candles: 3000, startBalance: 10000, feePct: 0.1, slippageBps: 5, spreadBps: 2 };
 const STOCKS = ['RELIANCE', 'HDFCBANK', 'ICICIBANK', 'INFY', 'TCS', 'SBIN'];
 const STOCK_DEFAULTS = { symbols: ['RELIANCE'], intervals: ['1h'], candles: 3000, startBalance: 1000000, feePct: 0.12, slippageBps: 3, spreadBps: 3 };
+const FUTURES = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'RELIANCE', 'HDFCBANK'];
+// NSE futures: ~0.02% per side (brokerage cap + STT on sells), tight spreads. The backtest sizes by notional (no lots/margin).
+const FUTURES_DEFAULTS = { symbols: ['NIFTY'], intervals: ['15m'], candles: 1500, startBalance: 2500000, feePct: 0.02, slippageBps: 1, spreadBps: 1 };
 const FX_DEFAULTS = { symbols: ['USDINR'], intervals: ['1h'], candles: 1500, startBalance: 1000000, feePct: 0.03, slippageBps: 0.5, spreadBps: 0.5 };
 
 function Toggles({ options, value, onChange, max }) {
@@ -171,7 +174,8 @@ export default function Backtest() {
   const fmtUsd = money;
   const fx = market === 'forex';
   const stocks = market === 'stocks';
-  const DEF = fx ? FX_DEFAULTS : stocks ? STOCK_DEFAULTS : CRYPTO_DEFAULTS;
+  const futures = market === 'futures';
+  const DEF = fx ? FX_DEFAULTS : stocks ? STOCK_DEFAULTS : futures ? FUTURES_DEFAULTS : CRYPTO_DEFAULTS;
   const [lib] = usePoll('/strategies');
   const [f, setF] = useState({
     strategy: 'adaptive', threshold: 30, riskPct: 1, maxPositionPct: 25,
@@ -188,7 +192,7 @@ export default function Backtest() {
     if (!f.symbols.length || !f.intervals.length) return toast('Pick at least one coin and one timeframe', 'err');
     setBusy(true);
     try {
-      setRes(await api.post('/backtest', { ...f, exchange: fx || stocks ? exchange : 'binance', allowShort: Boolean(f.allowShort && exInfo?.canShort) }));
+      setRes(await api.post('/backtest', { ...f, exchange: fx || stocks || futures ? exchange : 'binance', allowShort: Boolean(f.allowShort && exInfo?.canShort) }));
       reloadHistory();
     } catch (e) {
       toast(e.message, 'err');
@@ -203,13 +207,13 @@ export default function Backtest() {
       <div className="card" style={{ alignSelf: 'start' }}>
         <div className="card-head"><span className="card-title"><FlaskConical size={14} /> Backtest Lab 2.0</span></div>
         <div className="col" style={{ gap: 12 }}>
-          <Field label={fx ? 'Pairs (NSE futures)' : stocks ? 'Stocks (NSE)' : 'Coins (up to 5)'}><Toggles options={fx ? FX_PAIRS : stocks ? STOCKS : [...new Set([...COINS, ...f.symbols])]} value={f.symbols} onChange={set('symbols')} max={5} />
-            {!fx && !stocks && <div style={{ marginTop: 6 }}><CoinSearch onPick={(c) => !f.symbols.includes(c) && f.symbols.length < 5 && set('symbols')([...f.symbols, c])} /></div>}</Field>
-          <Field label="Timeframes (up to 4)"><Toggles options={fx || stocks ? FX_TFS : TFS} value={f.intervals} onChange={set('intervals')} max={4} /></Field>
+          <Field label={fx ? 'Pairs (NSE currency futures)' : stocks ? 'Stocks (NSE)' : futures ? 'Futures (NSE index / stock)' : 'Coins (up to 5)'}><Toggles options={fx ? FX_PAIRS : stocks ? STOCKS : futures ? FUTURES : [...new Set([...COINS, ...f.symbols])]} value={f.symbols} onChange={set('symbols')} max={5} />
+            {!fx && !stocks && !futures && <div style={{ marginTop: 6 }}><CoinSearch onPick={(c) => !f.symbols.includes(c) && f.symbols.length < 5 && set('symbols')([...f.symbols, c])} /></div>}</Field>
+          <Field label="Timeframes (up to 4)"><Toggles options={fx || stocks || futures ? FX_TFS : TFS} value={f.intervals} onChange={set('intervals')} max={4} /></Field>
           <Field label="Strategy">
             <select className="select" value={f.strategy} onChange={set('strategy')}>{strategies.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
           </Field>
-          <Field label="History (candles per market)" hint={fx ? 'Current near-month contract from Kite (needs a Kite login)' : stocks ? 'From Kite historical data (needs a Kite login)' : 'Up to 5000 from Binance'}><input className="input mono" type="number" value={f.candles} onChange={set('candles')} /></Field>
+          <Field label="History (candles per market)" hint={fx || futures ? 'Current near-month contract from Kite (needs a Kite login)' : stocks ? 'From Kite historical data (needs a Kite login)' : 'Up to 5000 from Binance'}><input className="input mono" type="number" value={f.candles} onChange={set('candles')} /></Field>
           <div className="divider" />
           <div className="row small bold" style={{ gap: 6 }}><Layers size={14} /> Validation</div>
           <div className="grid g-2" style={{ gap: 10 }}>

@@ -23,14 +23,16 @@ export default function Portfolio() {
   const items = [
     ...named.map((a, k) => ({ label: a.asset, value: a.value, color: CATEGORICAL[k] })),
     ...(other > 0 ? [{ label: 'Other', value: other, color: CATEGORICAL[6] }] : []),
-    ...(stable > 0 ? [{ label: market === 'crypto' ? 'Stablecoins' : 'INR cash', value: stable, color: '#5b6478' }] : []),
+    ...(stable > 0 ? [{ label: market === 'crypto' ? 'Stablecoins' : pf.margin ? 'Free margin' : 'INR cash', value: stable, color: '#5b6478' }] : []),
   ];
 
   return (
     <>
       <div className="grid g-4">
         <div className="card stat"><span className="stat-label">Portfolio value · {mode}</span><span className="stat-value">{fmtUsd(pf.total)}</span></div>
-        <div className="card stat"><span className="stat-label">Market exposure</span><span className="stat-value">{pf.exposurePct.toFixed(1)}%</span><span className="stat-sub muted">stablecoins {pf.stablePct.toFixed(1)}%</span></div>
+        {pf.margin
+          ? <div className="card stat"><span className="stat-label">Margin used</span><span className="stat-value">{pf.exposurePct.toFixed(1)}%</span><span className="stat-sub muted">leverage {pf.margin.leverage.toFixed(2)}x · notional {fmtUsd(pf.margin.notional, 0)} · free {fmtUsd(pf.margin.freeMargin, 0)}</span></div>
+          : <div className="card stat"><span className="stat-label">Market exposure</span><span className="stat-value">{pf.exposurePct.toFixed(1)}%</span><span className="stat-sub muted">stablecoins {pf.stablePct.toFixed(1)}%</span></div>}
         <div className="card stat"><span className="stat-label">Portfolio volatility (annualised)</span><span className="stat-value">{pf.annualVolPct}%</span><span className="stat-sub muted">from hourly returns + correlations</span></div>
         <div className="card stat"><span className="stat-label">Portfolio risk</span><span className={`stat-value ${RISK_TONE[pf.riskLevel]}`}>{pf.riskLevel}</span><span className="stat-sub muted">{pf.warnings.length} warning(s)</span></div>
       </div>

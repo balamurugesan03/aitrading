@@ -4,7 +4,7 @@
 import { EventEmitter } from 'events';
 import { db } from '../db/index.js';
 import { analyze } from '../ai/analyzer.js';
-import { ex, fetchCandles, symbolInfo, tradingFor, credsFor } from '../exchange/index.js';
+import { ex, fetchCandles, symbolInfo, tradingFor, credsFor, lotOf } from '../exchange/index.js';
 import { computeAll, last } from '../ai/indicators.js';
 import { regimeSeries } from '../ai/regime.js';
 import { STRATEGY_LIBRARY, getStrategy } from '../ai/strategies.js';
@@ -95,8 +95,8 @@ async function recordTrade({ user, bot, mode, exchange, symbol, side, fill, reas
   return trade;
 }
 
-const qtyText = (exchange, qty) => {
-  const lot = ex(exchange).lotUnits;
+const qtyText = async (exchange, symbol, qty) => {
+  const lot = await lotOf(exchange, symbol); // futures: the contract's own lot size
   return lot > 1 ? `${+(qty / lot).toFixed(2)} lot(s)` : lot === 1 ? `${qty} share(s)` : qty.toFixed(6);
 };
 
@@ -126,8 +126,10 @@ async function openPosition(bot, user, signal, sizing, candles, candleTime) {
     contract: fill.contract, contractExpiry: fill.contractExpiry || info.expiry, // futures only
   };
   await db.bots.update(bot._id, { position });
-  await log(bot, 'trade', `${short ? 'SELL SHORT' : 'BUY'} ${qtyText(bot.exchange, fill.qty)} ${info.base} @ ${fill.price.toFixed(4)} | risk ${sizing.riskPct}% | SL ${position.stopLoss.toFixed(4)} TP ${position.takeProfit.toFixed(4)}`);
-  notify(user._id, { type: 'trade', title: `${bot.name}: ${short ? 'sold short' : 'bought'} ${info.base}`, body: `${qtyText(bot.exchange, fill.qty)} @ ${fill.price.toFixed(4)} (${bot.mode})`, important: bot.mode === 'live' });
+  const qtyLabel = await qtyText(bot.exchange, bot.symbol, fill.qty);
+  const marginNote = fill.sim?.marginBlocked ? ` | margin ${fill.sim.marginBlocked.toFixed(0)}` : '';
+  await log(bot, 'trade', `${short ? 'SELL SHORT' : 'BUY'} ${qtyLabel} ${info.base} @ ${fill.price.toFixed(4)} | risk ${sizing.riskPct}%${marginNote} | SL ${position.stopLoss.toFixed(4)} TP ${position.takeProfit.toFixed(4)}`);
+  notify(user._id, { type: 'trade', title: `${bot.name}: ${short ? 'sold short' : 'bought'} ${info.base}`, body: `${qtyLabel} @ ${fill.price.toFixed(4)} (${bot.mode})`, important: bot.mode === 'live' });
   if (bot.copyable && !short) events.emit('copy:open', { bot, user, notional: fill.cost, equity: sizing.equity });
   // Put the stop on the exchange straight away instead of waiting for the next tick.
   if (bot.mode === 'live') await syncExchangeStop(await db.bots.findOne({ _id: bot._id }), user, fill.price).catch((err) => log(bot, 'error', `Exchange stop: ${err.message}`));
@@ -635,6 +637,7 @@ export async function resumeRunningBots() {
       // Forex equity curve once there is a forex paper wallet (needs a Kite session for prices).
       if (await db.wallet.findOne({ kind: 'paper-inr', userId: u._id })) await snapshotEquity(u, 'paper', 'zerodha').catch(() => {});
       if (await db.wallet.findOne({ kind: 'paper-nse', userId: u._id })) await snapshotEquity(u, 'paper', 'nse').catch(() => {});
+      if (await db.wallet.findOne({ kind: 'paper-nfut', userId: u._id })) await snapshotEquity(u, 'paper', 'nfut').catch(() => {});
     }
   };
   snap();

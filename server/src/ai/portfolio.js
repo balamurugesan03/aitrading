@@ -1,8 +1,8 @@
 // Portfolio AI: valuation, exposure, correlation clusters, portfolio volatility and risk level.
 import { db } from '../db/index.js';
 import * as bn from '../exchange/binance.js';
-import { getPaperBalances } from '../bot/paperBroker.js';
-import { EXCHANGES, tradingFor, credsFor, ex, isFx, accountOf, fetchCandles } from '../exchange/index.js';
+import { getPaperBalances, getPaperMargin } from '../bot/paperBroker.js';
+import { EXCHANGES, tradingFor, credsFor, ex, isFx, isMargin, marginRateFor, accountOf, fetchCandles } from '../exchange/index.js';
 import { STABLES, pearson, returns, mapLimit } from './util.js';
 
 const retCache = new Map();
@@ -57,9 +57,11 @@ async function valueFxPortfolio(user, mode, exchange) {
   const adapter = ex(exchange);
   let rows;
   let total;
+  let liveMarginUsed = 0;
   if (mode === 'live') {
     const { client } = await tradingFor(user, exchange);
     const a = await client.fxAccount();
+    liveMarginUsed = a.marginUsed || 0;
     const pos = a.positions.map((p) => ({ asset: p.pair, amount: p.units, side: p.units < 0 ? 'short' : 'long', price: p.lastPrice, value: Math.abs(p.units) * p.lastPrice, change: 0, stable: false, contract: p.contract, pnl: p.pnl }));
     const notional = pos.reduce((s, p) => s + p.value, 0);
     rows = [{ asset: 'INR', amount: a.equity - notional, price: 1, value: a.equity - notional, change: 0, stable: true }, ...pos];
@@ -79,9 +81,28 @@ async function valueFxPortfolio(user, mode, exchange) {
     const notional = held2.reduce((s, x) => s + x.value, 0);
     rows = [{ asset: 'INR', amount: total - notional, price: 1, value: total - notional, change: 0, stable: true }, ...held2];
   }
+  // Margin accounts (NSE futures): a position "uses" the margin it blocks, not its notional. Position rows carry
+  // value = blocked margin (with the notional alongside), and the cash row is the free margin, so the rows still
+  // sum to equity and exposure means "share of equity blocked as margin". Leverage = notional / equity.
+  let marginInfo = null;
+  if (isMargin(exchange)) {
+    const pos = rows.filter((x) => !x.stable);
+    const notional = pos.reduce((s, x) => s + x.value, 0);
+    let blocked;
+    if (mode === 'live') {
+      blocked = (x) => (notional ? liveMarginUsed * (x.value / notional) : 0); // Zerodha reports one total; split by notional
+    } else {
+      const m = await getPaperMargin(user._id, exchange);
+      blocked = (x) => m[x.asset] ?? x.value * marginRateFor(exchange, x.asset);
+    }
+    pos.forEach((x) => { x.notional = x.value; x.value = blocked(x); });
+    const marginUsed = pos.reduce((s, x) => s + x.value, 0);
+    rows = [{ asset: 'INR', amount: total - marginUsed, price: 1, value: total - marginUsed, change: 0, stable: true }, ...pos];
+    marginInfo = { marginUsed, notional, freeMargin: total - marginUsed, leverage: total > 0 ? notional / total : 0 };
+  }
   rows = rows.filter((x) => x.amount !== 0 || x.stable).sort((a, b) => b.value - a.value);
   rows.forEach((x) => (x.weightPct = total ? (x.value / total) * 100 : 0));
-  return { mode, exchange, currency: 'INR', total, assets: rows, stablePct: rows.filter((x) => x.stable).reduce((s, x) => s + x.weightPct, 0) };
+  return { mode, exchange, currency: 'INR', total, assets: rows, stablePct: rows.filter((x) => x.stable).reduce((s, x) => s + x.weightPct, 0), ...(marginInfo && { margin: marginInfo }) };
 }
 
 export async function valuePortfolio(user, mode = 'paper', exchange = 'binance') {
@@ -109,7 +130,7 @@ export async function portfolioIntelligence(user, mode = 'paper', exchange = 'bi
   const matrix = risky.map((a, i) => risky.map((b, j) => +(i === j ? 1 : pearson(series[i], series[j])).toFixed(2)));
 
   // Portfolio volatility from the covariance of hourly returns (annualised).
-  const w = risky.map((a) => a.value / (pf.total || 1));
+  const w = risky.map((a) => (a.notional ?? a.value) / (pf.total || 1)); // futures: price risk scales with notional, not margin
   const sd = (r) => {
     const m = r.reduce((s, v) => s + v, 0) / (r.length || 1);
     return Math.sqrt(r.reduce((s, v) => s + (v - m) ** 2, 0) / (r.length || 1));

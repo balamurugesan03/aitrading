@@ -11,6 +11,7 @@ export const DEFAULT_RISK = {
   maxRiskPct: 2,
   maxOpenPositions: 5,
   maxExposurePct: 60,
+  maxLeverage: 3, // margin (futures) accounts: total notional / equity
   maxCorrelatedPositions: 2,
   correlationLimit: 0.8,
   maxDrawdownHaltPct: 20,

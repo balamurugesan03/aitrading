@@ -8,6 +8,7 @@ import { coinbase } from './coinbase.js';
 import { zerodha } from './zerodha.js';
 import { nse } from './nse.js';
 import { nfo } from './nfo.js';
+import { nfut } from './nfut.js';
 import { db } from '../db/index.js';
 import { decrypt } from '../auth/crypto.js';
 import { config } from '../config.js';
@@ -33,11 +34,17 @@ const binance = {
   }),
 };
 
-export const EXCHANGES = { binance, bybit, okx, kraken, coinbase, zerodha, nse, nfo };
+export const EXCHANGES = { binance, bybit, okx, kraken, coinbase, zerodha, nse, nfo, nfut };
 
-// INR-quoted adapters (NSE forex and NSE stocks) are valued in rupees, separately from the USDT crypto account.
+// INR-quoted adapters (NSE forex, stocks and futures) are valued in rupees, separately from the USDT crypto account.
 export const isFx = (id) => EXCHANGES[id]?.currency === 'INR';
-// Separate accounts (wallet, equity, drawdown, P&L): 'crypto' (every crypto exchange), 'fx' (NSE forex), 'stocks' (NSE stocks).
+// Margin accounts (futures): a position blocks marginRate x notional instead of its full notional.
+export const isMargin = (id) => Boolean(EXCHANGES[id]?.margin);
+export const marginRateFor = (id, symbol, info) => info?.marginRate ?? EXCHANGES[id]?.marginRateOf?.(symbol) ?? 1;
+// Units per lot for lot-traded adapters: a per-contract lot (futures) or one fixed lot (forex 1,000 units, stocks 1 share).
+export const lotOf = async (id, symbol) => (EXCHANGES[id]?.lotFor ? EXCHANGES[id].lotFor(symbol) : EXCHANGES[id]?.lotUnits);
+// Separate accounts (wallet, equity, drawdown, P&L): 'crypto' (every crypto exchange), 'fx' (NSE forex), 'stocks' (NSE stocks),
+// 'futures' (NSE index and stock futures, a margin account).
 export const accountOf = (id) => EXCHANGES[id || 'binance']?.account || 'crypto';
 export const EXCHANGE_IDS = Object.keys(EXCHANGES);
 
@@ -47,7 +54,7 @@ export function ex(id = 'binance') {
   return e;
 }
 
-export const listExchanges = () => Object.values(EXCHANGES).map((e) => ({ id: e.id, name: e.name, trading: e.trading, intervals: e.intervals, currency: e.currency || 'USDT', market: e.market || 'crypto', account: e.account || 'crypto', connection: e.connection || null, canShort: Boolean(e.canShort) }));
+export const listExchanges = () => Object.values(EXCHANGES).map((e) => ({ id: e.id, name: e.name, trading: e.trading, intervals: e.intervals, currency: e.currency || 'USDT', market: e.market || 'crypto', account: e.account || 'crypto', connection: e.connection || null, canShort: Boolean(e.canShort), margin: Boolean(e.margin) }));
 
 const symCache = new Map();
 export async function symbolInfo(exchangeId, symbol) {

@@ -40,6 +40,7 @@ export const config = {
   paperStartBalance: Number(process.env.PAPER_START_BALANCE || 10000),
   paperFxStartBalance: Number(process.env.PAPER_FX_START_BALANCE || 1000000), // INR paper wallet for NSE forex
   paperStocksStartBalance: Number(process.env.PAPER_STOCKS_START_BALANCE || 1000000), // INR paper wallet for NSE stocks
+  paperFuturesStartBalance: Number(process.env.PAPER_FUTURES_START_BALANCE || 2500000), // INR paper margin account for NSE futures
   paperOptionsStartBalance: Number(process.env.PAPER_OPTIONS_START_BALANCE || 500000), // INR paper wallet for NSE options
 };
 

@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api, authEvents, getToken, setToken } from './api.js';
-import { fmtMoney, FX_PAIRS, isCryptoSymbol } from './format.js';
+import { fmtMoney, FX_PAIRS, INDEX_FUTURES, isCryptoSymbol } from './format.js';
 import { useLocalState, useServerEvents } from './hooks.js';
 
 const Ctx = createContext(null);
@@ -76,7 +76,8 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!exInfo) return;
     if (market === 'forex' && !FX_PAIRS.includes(symbol)) setSymbol('USDINR');
-    if (market === 'stocks' && (FX_PAIRS.includes(symbol) || isCryptoSymbol(symbol))) setSymbol('RELIANCE');
+    if (market === 'stocks' && (FX_PAIRS.includes(symbol) || INDEX_FUTURES.includes(symbol) || isCryptoSymbol(symbol))) setSymbol('RELIANCE');
+    if (market === 'futures' && (FX_PAIRS.includes(symbol) || isCryptoSymbol(symbol))) setSymbol('NIFTY');
     if (market === 'crypto' && !isCryptoSymbol(symbol)) setSymbol('BTCUSDT');
     if (!exInfo.intervals.includes(interval)) setInterval_(exInfo.intervals.includes('15m') ? '15m' : exInfo.intervals[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps

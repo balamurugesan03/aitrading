@@ -119,6 +119,8 @@ r.get('/copy/leaderboard', wrap(async (req, res) => {
 r.patch('/copy/bots/:id', wrap(async (req, res) => {
   const bot = await db.bots.findOne({ _id: req.params.id });
   if (!bot || bot.userId !== req.user._id) throw bad('Bot not found', 404);
+  // Copy sizing works on cash-funded accounts; a margin (futures) position cannot be mirrored safely by notional.
+  if (req.body?.copyable && EXCHANGES[bot.exchange]?.margin) throw bad('Futures (margin) bots cannot be shared for copy trading');
   const updated = await db.bots.update(bot._id, { copyable: Boolean(req.body?.copyable), copyDescription: String(req.body?.copyDescription || bot.copyDescription || '').slice(0, 300) });
   await audit(req.user._id, req.body?.copyable ? 'copy.leader_on' : 'copy.leader_off', { bot: bot.name }, req);
   res.json(updated);

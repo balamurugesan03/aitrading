@@ -31,6 +31,7 @@ const QUOTE_RE = /(USDT|USDC|FDUSD|INR|BTC|ETH|BNB)$/;
 export const baseOf = (symbol) => symbol.replace(QUOTE_RE, '');
 export const quoteOf = (symbol) => symbol.match(QUOTE_RE)?.[1] || 'INR';
 export const FX_PAIRS = ['USDINR', 'EURINR', 'GBPINR', 'JPYINR'];
+export const INDEX_FUTURES = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY']; // NSE futures also cover F&O stocks
 export const isCryptoSymbol = (symbol) => /(USDT|USDC|FDUSD|BTC|ETH|BNB)$/.test(symbol);
 
 // Money in the account currency: rupees (Indian grouping) for the forex account, dollars for crypto.

@@ -5,7 +5,7 @@ import { api } from '../lib/api.js';
 import { useApp } from '../lib/AppContext.jsx';
 import { usePoll, useServerEvents } from '../lib/hooks.js';
 import { CoinIcon, SignalBadge, GradeBadge, DecisionBadge, RegimeChip, Seg, Switch, Field, Spinner, Empty } from '../components/ui.jsx';
-import { fmtPrice, fmtMoney, fmtPct, fmtQty, ago, tone, baseOf, quoteOf, FX_PAIRS, isCryptoSymbol } from '../lib/format.js';
+import { fmtPrice, fmtMoney, fmtPct, fmtQty, ago, tone, baseOf, quoteOf, FX_PAIRS, INDEX_FUTURES, isCryptoSymbol } from '../lib/format.js';
 
 const DEFAULTS = {
   // EMA Trend on 4h was the only strategy profitable on train, validation and out-of-sample data (2020-2026).
@@ -24,12 +24,17 @@ function BotForm({ initial, onClose, onSaved }) {
   const strat = lib?.strategies.find((s) => s.id === f.strategy);
   const fx = exInfo?.market === 'forex';
   const stocks = exInfo?.market === 'stocks';
+  const futures = exInfo?.market === 'futures';
+  const nseSymbol = (s, fallback) => (FX_PAIRS.includes(s) || isCryptoSymbol(s) ? fallback : s);
   // Switching the bot's exchange between crypto and NSE forex resets the pair and an unsupported timeframe.
   useEffect(() => {
     if (!exInfo || initial?._id) return;
     setF((s) => ({
       ...s,
-      symbol: fx ? (FX_PAIRS.includes(s.symbol) ? s.symbol : 'USDINR') : stocks ? (FX_PAIRS.includes(s.symbol) || isCryptoSymbol(s.symbol) ? 'RELIANCE' : s.symbol) : isCryptoSymbol(s.symbol) ? s.symbol : 'BTCUSDT',
+      symbol: fx ? (FX_PAIRS.includes(s.symbol) ? s.symbol : 'USDINR')
+        : stocks ? (INDEX_FUTURES.includes(s.symbol) ? 'RELIANCE' : nseSymbol(s.symbol, 'RELIANCE'))
+          : futures ? nseSymbol(s.symbol, 'NIFTY')
+            : isCryptoSymbol(s.symbol) ? s.symbol : 'BTCUSDT',
       interval: exInfo.intervals.includes(s.interval) ? s.interval : '15m',
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -39,7 +44,7 @@ function BotForm({ initial, onClose, onSaved }) {
     setBusy(true);
     try {
       const sym = f.symbol.toUpperCase();
-      const body = { ...f, symbol: fx || stocks || sym.endsWith('USDT') ? sym : `${sym}USDT` };
+      const body = { ...f, symbol: fx || stocks || futures || sym.endsWith('USDT') ? sym : `${sym}USDT` };
       const saved = initial?._id ? await api.patch(`/bots/${initial._id}`, body) : await api.post('/bots', body);
       toast(initial?._id ? 'Bot updated' : `Bot "${saved.name}" created`);
       onSaved();
@@ -62,7 +67,9 @@ function BotForm({ initial, onClose, onSaved }) {
             <Field label="Bot name"><input className="input" value={f.name} onChange={set('name')} placeholder="Auto-named if empty" /></Field>
             <Field label="Trading pair">{fx
               ? <select className="select" value={f.symbol} onChange={set('symbol')}>{['USDINR', 'EURINR', 'GBPINR', 'JPYINR'].map((p) => <option key={p} value={p}>{p}</option>)}</select>
-              : <input className="input mono" value={f.symbol} onChange={set('symbol')} placeholder={stocks ? 'RELIANCE' : 'BTCUSDT'} />}</Field>
+              : futures
+                ? <><input className="input mono" list="nfut-symbols" value={f.symbol} onChange={set('symbol')} placeholder="NIFTY" /><datalist id="nfut-symbols">{INDEX_FUTURES.map((s) => <option key={s} value={s} />)}</datalist></>
+                : <input className="input mono" value={f.symbol} onChange={set('symbol')} placeholder={stocks ? 'RELIANCE' : 'BTCUSDT'} />}</Field>
           </div>
           <Field label="AI strategy" hint={strat ? `${strat.description}${strat.timeframes?.length ? ` Best on ${strat.timeframes.join(', ')}.` : ''}` : ''}>
             <select className="select" value={f.strategy} onChange={set('strategy')}>

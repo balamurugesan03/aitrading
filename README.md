@@ -67,12 +67,26 @@ Set `ADMIN_PASSWORD` in `server/.env`, then double-click `start.bat` and sign in
 | `MONGO_URI` | Optional. Without it, data is stored in `server/data/db.json`. |
 | `PAPER_START_BALANCE` | Starting balance of the crypto paper wallet (default 10000 USDT) |
 | `PAPER_FX_START_BALANCE` | Starting balance of the forex paper wallet (default 1000000 INR) |
+| `PAPER_FUTURES_START_BALANCE` | Starting balance of the NSE futures paper margin account (default 2500000 INR) |
+| `NFUT_INDEX_MARGIN` / `NFUT_STOCK_MARGIN` | Paper margin per position as a share of notional for index / stock futures (defaults 0.12 / 0.20). Live orders use Zerodha's exact margin. |
 | `PAPER_REJECT_RATE` | Simulated exchange rejection rate for paper orders (default 0.002) |
 | `MASTER_KEY` | 64 hex chars that encrypt stored exchange keys. If empty, one is generated in `server/data/master.key`. **Back it up.** |
 | `SUPERADMIN_USERNAME` / `SUPERADMIN_PASSWORD` | Separate Super Admin login at `/superadmin` (subscription plans, user subscriptions, upgrade requests, payments). It cannot sign in to trading and trading accounts cannot sign in there. Development default: `superadmin` / `superadmin123` |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | The login. `ADMIN_PASSWORD` is applied on first start and whenever you change it (restart), which is the offline password reset. Development default: `admin` / `admin123` |
 | `APP_URL` | Public app URL (https in production) |
 | `DATA_DIR` | Folder for `db.json` and `master.key` (default `server/data`) |
+
+## NSE futures (Zerodha)
+
+Pick **Zerodha (NSE futures)** in the top-bar exchange menu. It uses the same Kite login as forex.
+
+- **Instruments:** index futures (NIFTY, BANKNIFTY, FINNIFTY, MIDCPNIFTY) and every F&O stock future (RELIANCE, HDFCBANK and so on). The symbol is the underlying. Orders go to the near-month contract and roll 2 days before expiry. Bots close a position 1 day before its contract expires.
+- **Lots:** whole lots of each contract's own lot size, read from the Kite instrument list.
+- **Margin account:** a position blocks only its margin, not its full notional. Paper fills block `NFUT_INDEX_MARGIN` / `NFUT_STOCK_MARGIN` of notional. Live orders are checked against Kite's order-margin API before they are sent. Portfolio shows margin used, free margin, notional and leverage.
+- **Risk engine:** size still comes from the stop distance (risk % of equity). Max position %, exposure % and free cash are counted in margin, and the new **Max futures leverage** limit (Risk page, default 3x) caps total notional / equity.
+- **Long and short:** both are supported, one direction per symbol. Stops are SL (stop-limit) DAY orders that the engine re-places each trading day.
+- **Hours:** Mon-Fri 09:15-15:30 IST. Charges: Zerodha F&O futures (brokerage min(Rs 20, 0.03%), STT 0.02% on sells, exchange, SEBI, stamp duty and GST).
+- **Backtests** size by notional with futures costs. They do not model lots or margin.
 
 ## Forex (Zerodha)
 

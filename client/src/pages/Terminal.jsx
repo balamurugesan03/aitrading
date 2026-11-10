@@ -68,13 +68,16 @@ function OrderBook({ symbol, exchange }) {
   );
 }
 
-function OrderPanel({ symbol, price, onDone, exchange }) {
+function OrderPanel({ symbol, price, onDone, exchange, lot, marginRate }) {
   const { mode, toast, exInfo, money } = useApp();
   const fx = exInfo?.market === 'forex';
   const stocks = exInfo?.market === 'stocks';
-  const inr = fx || stocks;
+  const futures = exInfo?.market === 'futures';
+  const inr = fx || stocks || futures;
   const quote = quoteOf(symbol);
-  const LOT = fx ? 1000 : 1; // NSE currency futures: 1 lot = 1,000 units; stocks: whole shares
+  const LOT = fx ? 1000 : futures ? lot || 1 : 1; // currency futures: 1 lot = 1,000 units; NSE futures: the contract's lot; stocks: whole shares
+  const lotted = fx || futures;
+  const mRate = futures ? marginRate || 1 : 1; // NSE futures block only this share of notional as margin
   const [side, setSide] = useState('BUY'); // BUY | SELL | SHORT | COVER (the last two: forex futures only)
   const [amount, setAmount] = useState(inr ? '100000' : '100');
   const [busy, setBusy] = useState(false);
@@ -87,7 +90,7 @@ function OrderPanel({ symbol, price, onDone, exchange }) {
   const held = Math.max(0, heldRow?.amount || 0);
   const shortHeld = Math.max(0, -(heldRow?.amount || 0));
   const opening = side === 'BUY' || side === 'SHORT';
-  const lotsFor = (rupees) => (price ? Math.floor(rupees / (price * LOT * (fx ? 1.001 : 1.0035))) : 0);
+  const lotsFor = (rupees) => (price ? Math.floor(rupees / (price * LOT * (lotted ? 1.001 : 1.0035))) : 0);
 
   const submit = async () => {
     setBusy(true);
@@ -96,7 +99,7 @@ function OrderPanel({ symbol, price, onDone, exchange }) {
       const apiSide = side === 'SHORT' ? 'SELL' : side === 'COVER' ? 'BUY' : side;
       const body = opening ? { symbol, side: apiSide, mode, exchange, short, quoteAmount: +amount } : { symbol, side: apiSide, mode, exchange, short, quantity: +amount };
       const t = await api.post('/trade', body);
-      toast(`${side} ${fx ? `${t.qty / LOT} lot(s)` : stocks ? `${t.qty} share(s)` : fmtQty(t.qty)} ${inr ? symbol : base} @ ${fmtPrice(t.price)} (${mode})`);
+      toast(`${side} ${lotted ? `${t.qty / LOT} lot(s)` : stocks ? `${t.qty} share(s)` : fmtQty(t.qty)} ${inr ? symbol : base} @ ${fmtPrice(t.price)} (${mode})`);
       reload();
       onDone?.();
     } catch (e) {
@@ -108,23 +111,24 @@ function OrderPanel({ symbol, price, onDone, exchange }) {
   return (
     <div className="col" style={{ gap: 12 }}>
       <Seg value={side} onChange={(s) => { setSide(s); setAmount(s === 'BUY' || s === 'SHORT' ? (inr ? '100000' : '100') : String(s === 'COVER' ? shortHeld : held ? +held.toFixed(6) : '')); }} options={[{ value: 'BUY', label: 'Buy' }, { value: 'SELL', label: 'Sell' }, ...(exInfo?.canShort ? [{ value: 'SHORT', label: 'Short' }, { value: 'COVER', label: 'Cover' }] : [])]} />
-      <Field label={opening ? `Amount (${quote})` : fx ? `Quantity (units, 1 lot = ${LOT})` : stocks ? 'Quantity (shares)' : `Quantity (${base})`} hint={opening ? `Available: ${money(usdt)}` : side === 'COVER' ? `Short: ${fmtQty(shortHeld)} units (${shortHeld / LOT} lots)` : `Holding: ${fmtQty(held)} ${fx ? `units (${held / LOT} lots)` : stocks ? 'shares' : base}`}>
+      <Field label={opening ? (futures ? `Notional (${quote})` : `Amount (${quote})`) : lotted ? `Quantity (units, 1 lot = ${LOT})` : stocks ? 'Quantity (shares)' : `Quantity (${base})`} hint={opening ? `${futures ? 'Free margin' : 'Available'}: ${money(usdt)}` : side === 'COVER' ? `Short: ${fmtQty(shortHeld)} units (${shortHeld / LOT} lots)` : `Holding: ${fmtQty(held)} ${lotted ? `units (${held / LOT} lots)` : stocks ? 'shares' : base}`}>
         <input className="input mono" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
       </Field>
       <div className="row" style={{ gap: 6 }}>
         {[25, 50, 75, 100].map((p) => (
-          <button key={p} className="btn sm" style={{ flex: 1 }} onClick={() => setAmount(opening ? String(Math.floor(usdt * p) / 100) : String(+(((side === 'COVER' ? shortHeld : held) * p) / 100).toFixed(6)))}>{p}%</button>
+          <button key={p} className="btn sm" style={{ flex: 1 }} onClick={() => setAmount(opening ? String(Math.floor((usdt * p) / mRate) / 100) : String(+(((side === 'COVER' ? shortHeld : held) * p) / 100).toFixed(6)))}>{p}%</button>
         ))}
       </div>
       <div className="kv small">
         <span>Est. {opening ? 'quantity' : 'value'}</span>
-        <span>{price ? (opening ? (inr ? `${lotsFor(+amount)} ${fx ? 'lot(s)' : 'share(s)'} · ${money(lotsFor(+amount) * LOT * price)}` : `${fmtQty(+amount / price)} ${base}`) : money(+amount * price)) : '—'}</span>
+        <span>{price ? (opening ? (inr ? `${lotsFor(+amount)} ${lotted ? 'lot(s)' : 'share(s)'} · ${money(lotsFor(+amount) * LOT * price)}${futures ? ` · margin ~${money(lotsFor(+amount) * LOT * price * mRate, 0)}` : ''}` : `${fmtQty(+amount / price)} ${base}`) : money(+amount * price)) : '—'}</span>
         <span>Mode</span><span className={mode === 'live' ? 'down' : 'up'}>{mode.toUpperCase()}</span>
       </div>
       <button className={`btn block ${side === 'BUY' || side === 'COVER' ? 'buy' : 'sell'}`} disabled={busy || !(+amount > 0)} onClick={submit}>
         {busy ? <Spinner /> : <ShoppingCart size={15} />} {side} {inr ? symbol : base} · {inr ? 'Marketable limit' : 'Market'}
       </button>
       {fx && <div className="tiny dim">NSE currency futures (near month), whole lots only, Mon-Fri 09:00-17:00 IST. The bot never uses leverage: a lot needs its full notional in the account.</div>}
+      {futures && <div className="tiny dim">NSE {symbol} futures (near month, rolled 2 days before expiry), whole lots of {LOT} units, Mon-Fri 09:15-15:30 IST. Enter the notional: a position blocks about {(mRate * 100).toFixed(0)}% of it as margin (live orders use Zerodha's exact margin).</div>}
       {stocks && <div className="tiny dim">NSE delivery (CNC), whole shares, Mon-Fri 09:15-15:30 IST. Selling shares you hold needs DDPI enabled on your Zerodha account.</div>}
     </div>
   );
@@ -275,7 +279,7 @@ export default function Terminal() {
         </div>
         <div className="card">
           <div className="card-head"><span className="card-title"><ShoppingCart size={14} /> Place Order</span></div>
-          <OrderPanel symbol={symbol} price={price} onDone={reloadTrades} exchange={exchange} />
+          <OrderPanel symbol={symbol} price={price} onDone={reloadTrades} exchange={exchange} lot={ticker?.lotSize} marginRate={ticker?.marginRate} />
         </div>
       </div>
     </div>
