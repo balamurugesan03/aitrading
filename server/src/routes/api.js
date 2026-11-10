@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { db, dbKind } from '../db/index.js';
 import { hasClaude, config } from '../config.js';
 import { ex, fetchCandles, listExchanges, EXCHANGES, isFx, accountOf } from '../exchange/index.js';
+import { MAX_LEVERAGE as PERP_MAX_LEVERAGE } from '../exchange/bperp.js';
 import { walletFor } from '../bot/paperBroker.js';
 import { computeAll } from '../ai/indicators.js';
 import { analyze, STRATEGIES } from '../ai/analyzer.js';
@@ -130,7 +131,7 @@ r.post('/ai/analyze', wrap(async (req, res) => {
   const { symbol, interval, strategy = 'adaptive', useClaude = false, mode = 'paper', threshold = 30, exchange, allowShort = false } = req.body || {};
   const e = exOf(exchange);
   const signal = await analyze(sym(symbol), intv(interval), { strategy: getStrategy(strategy) ? strategy : 'adaptive', useClaude, forceClaude: useClaude, threshold: Number(threshold), exchange: e, allowShort: Boolean(allowShort) });
-  signal.risk = await evaluateRisk(signal, { user: req.user, mode: modeOf(mode), exchange: e }).catch((err) => ({ decision: 'ERROR', error: err.message, steps: [], gates: [] }));
+  signal.risk = await evaluateRisk(signal, { user: req.user, mode: modeOf(mode), exchange: e, leverage: req.body?.leverage }).catch((err) => ({ decision: 'ERROR', error: err.message, steps: [], gates: [] }));
   res.json(signal);
 }));
 
@@ -188,7 +189,7 @@ r.post('/strategies/benchmark', wrap(async (req, res) => {
 }));
 
 // ---------- Bots ----------
-const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct'];
+const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage'];
 const pickBot = (body, user) => {
   const out = {};
   BOT_FIELDS.forEach((k) => body[k] !== undefined && (out[k] = body[k]));
@@ -210,6 +211,11 @@ const pickBot = (body, user) => {
     if (out.allowShort && !EXCHANGES[exId]?.canShort) throw bad(`${EXCHANGES[exId]?.name || exId} cannot be sold short - shorts are available on NSE forex and NSE futures`);
   }
   ['threshold', 'riskPct', 'maxPositionPct', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct'].forEach((k) => out[k] !== undefined && (out[k] = Number(out[k])));
+  if (out.leverage !== undefined) {
+    const lev = Number(out.leverage);
+    if (!(lev >= 1 && lev <= PERP_MAX_LEVERAGE)) throw bad(`Leverage must be 1-${PERP_MAX_LEVERAGE}x`);
+    out.leverage = Math.round(lev);
+  }
   return out;
 };
 async function ownBot(req) {
@@ -304,7 +310,7 @@ r.get('/trades', wrap(async (req, res) => {
 }));
 
 r.post('/trade', wrap(async (req, res) => {
-  const { symbol, side, mode = 'paper', quoteAmount, quantity, exchange, short = false } = req.body || {};
+  const { symbol, side, mode = 'paper', quoteAmount, quantity, exchange, short = false, leverage } = req.body || {};
   if (!['BUY', 'SELL'].includes(side)) throw bad('side must be BUY or SELL');
   if (mode === 'live') await assertFeature(req.user, 'liveTrading');
   // short=true: SELL opens a short (quoteAmount), BUY covers it (quantity). Otherwise BUY opens a long, SELL closes it.
@@ -316,7 +322,14 @@ r.post('/trade', wrap(async (req, res) => {
   if (!s.tradingEnabled && opening) throw bad('Trading is disabled by the kill switch');
   const e = exOf(exchange);
   if (ex(e).optionsOnly) throw bad('Options are traded from the Options page as defined-risk strategies');
-  const { trade } = await executeOrder({ user: req.user, mode: modeOf(mode), exchange: e, symbol: sym(symbol), side, quoteAmount: Number(quoteAmount), quantity: Number(quantity), short: Boolean(short), reason: short ? (opening ? 'Manual short' : 'Manual cover') : 'Manual order' });
+  // Margin accounts: manual opens obey the same total-leverage cap as bots (Risk settings -> Max futures leverage).
+  if (opening && ex(e).margin) {
+    const acct = await accountState(req.user, modeOf(mode), e);
+    const cap = s.risk?.maxLeverage ?? 3;
+    const after = acct.equity > 0 ? ((acct.margin?.notional || 0) + Number(quoteAmount)) / acct.equity : Infinity;
+    if (after > cap + 1e-9) throw bad(`Leverage would be ${after.toFixed(2)}x after this order (max ${cap}x in Risk settings). Room left: ${Math.max(0, acct.equity * cap - (acct.margin?.notional || 0)).toFixed(0)} ${acct.currency || ''} notional`.trim());
+  }
+  const { trade } = await executeOrder({ user: req.user, mode: modeOf(mode), exchange: e, symbol: sym(symbol), side, quoteAmount: Number(quoteAmount), quantity: Number(quantity), short: Boolean(short), leverage: leverage === undefined ? undefined : Number(leverage), reason: short ? (opening ? 'Manual short' : 'Manual cover') : 'Manual order' });
   await audit(uid(req), 'trade.manual', { symbol: trade.symbol, side, mode: trade.mode, exchange: e, value: trade.cost }, req);
   res.json(trade);
 }));
@@ -364,7 +377,7 @@ r.post('/portfolio/reset', wrap(async (req, res) => {
     for (const l of await db.logs.find({ userId })) if (!l.botId || paperBotIds.has(l.botId)) await db.logs.remove(l._id);
   }
   const s = await getSettings(userId);
-  await updateSettings(userId, { peakEquity: { ...s.peakEquity, [{ crypto: 'paper', fx: 'paperFx', stocks: 'paperStocks', futures: 'paperFutures' }[account]]: amount } });
+  await updateSettings(userId, { peakEquity: { ...s.peakEquity, [{ crypto: 'paper', fx: 'paperFx', stocks: 'paperStocks', futures: 'paperFutures', perps: 'paperPerps' }[account]]: amount } });
   await audit(userId, 'paper.reset', { amount, clearHistory: Boolean(req.body?.clearHistory) }, req);
   res.json(await resetPaperWallet(userId, amount, e));
 }));
@@ -387,6 +400,7 @@ r.post('/backtest', wrap(async (req, res) => {
     exchange: exOf(b.exchange),
     ...(b.feePct != null && { feeRate: Number(b.feePct) / 100 }), ...(b.slippageBps != null && { slippageBps: Number(b.slippageBps) }), ...(b.spreadBps != null && { spreadBps: Number(b.spreadBps) }),
     latencyBars: Number(b.latencyBars ?? 1), fundingRatePct8h: Number(b.fundingRatePct8h ?? 0), allowShort: Boolean(b.allowShort), // shorts only where the exchange can sell first
+    ...(ex(exOf(b.exchange)).perp && { leverage: Math.min(PERP_MAX_LEVERAGE, Math.max(1, Number(b.leverage || 2))), liquidation: true }),
   });
   await db.backtests.insert({
     userId: uid(req),

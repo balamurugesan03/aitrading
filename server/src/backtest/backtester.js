@@ -85,13 +85,20 @@ const costsFor = (exchange) => (exchange && ex(exchange).costs) || {};
 // Simulates one parameter set over bars [from, to).
 // allowShort: a strongly bearish score may open a short (stop above, target below, trailing stop moving down),
 // covered on a bullish score. Shorts are fully funded like the live bots: the notional is reserved as collateral.
+// leverage > 1 (perpetuals): a position reserves notional / leverage as isolated margin; with `liquidation` on, a bar
+// that reaches the liquidation price closes the position and loses its margin, and entries whose stop is not well
+// inside the liquidation distance are skipped (as the live risk engine does). Funding accrues on the notional.
 export function simulate(base, scores, p) {
   const { candles, ctx } = base;
   const {
     from, to, threshold = 30, slMult = null, tpMult = null, riskPct = 1, maxPositionPct = 25,
     trailingStop = true, trailAtr = 2.5, dynamicRisk = true, startBalance = 10000, allowShort = false,
-    feeRate, slippageBps, spreadBps, latencyBars, fundingRatePct8h,
+    feeRate, slippageBps, spreadBps, latencyBars, fundingRatePct8h, leverage = 1, liquidation = false, mmr = 0.01,
   } = { ...DEFAULT_COSTS, ...p };
+  const lev = Math.max(1, leverage || 1);
+  const liqPriceOf = (entry, dir) => (dir > 0 ? (entry * (1 - 1 / lev)) / (1 - mmr) : (entry * (1 + 1 / lev)) / (1 + mmr));
+  const liqDistPct = (dir) => Math.abs(liqPriceOf(1, dir) - 1) * 100;
+  let liquidations = 0;
   const costIn = 1 + spreadBps / 20000 + slippageBps / 10000; // buying pays the spread + slippage
   const costOut = 1 - spreadBps / 20000 - slippageBps / 10000; // selling receives less
   const hoursPerBar = HOURS_PER_BAR[base.interval] || 1;
@@ -103,27 +110,29 @@ export function simulate(base, scores, p) {
   let pending = null; // order placed at bar close, filled after latency
 
   // Value of the open position at a price (long: market value; short: collateral + sale proceeds - buy-back).
-  const markValue = (price) => (pos.dir > 0 ? pos.qty * price : pos.cost + pos.proceeds - pos.qty * price);
+  // With leverage a long's market value is net of the borrowed part (notional - margin).
+  const markValue = (price) => (pos.dir > 0 ? pos.qty * price - (pos.notional - pos.cost) : pos.cost + pos.proceeds - pos.qty * price);
 
   const open = (dir, rawPrice, order, i) => {
-    const notional = Math.min(order.notional, cash);
+    const notional = Math.min(order.notional, cash * lev);
     if (notional < 10) return;
     const fill = rawPrice * (dir > 0 ? costIn : costOut);
-    cash -= notional;
-    const common = { dir, entry: fill, cost: notional, highest: fill, lowest: fill, bar: i, regime: order.regime, strategy: order.strategy, equityBefore: order.equityBefore, trail: order.trail };
+    const margin = notional / lev;
+    cash -= margin;
+    const common = { dir, entry: fill, cost: margin, notional, liq: liquidation ? liqPriceOf(fill, dir) : null, highest: fill, lowest: fill, bar: i, regime: order.regime, strategy: order.strategy, equityBefore: order.equityBefore, trail: order.trail };
     if (dir > 0) pos = { ...common, qty: (notional - notional * feeRate) / fill, stopLoss: fill - order.slDist, takeProfit: fill + order.tpDist };
     else pos = { ...common, qty: notional / fill, proceeds: notional * (1 - feeRate), stopLoss: fill + order.slDist, takeProfit: fill - order.tpDist };
     trades.push({ side: dir > 0 ? 'BUY' : 'SHORT', direction: dir > 0 ? 'long' : 'short', time: candles[i].time, price: fill, qty: pos.qty, score: order.score, regime: order.regime });
   };
 
   const close = (rawPrice, reason, i) => {
-    const funding = pos.cost * (fundingRatePct8h / 100) * ((i - pos.bar) * hoursPerBar / 8);
+    const funding = pos.notional * (fundingRatePct8h / 100) * ((i - pos.bar) * hoursPerBar / 8);
     let fill;
     let net;
     if (pos.dir > 0) {
       fill = rawPrice * costOut;
       const gross = pos.qty * fill;
-      net = gross - gross * feeRate - funding;
+      net = gross - gross * feeRate - funding - (pos.notional - pos.cost);
     } else {
       fill = rawPrice * costIn;
       const buyBack = pos.qty * fill;
@@ -132,6 +141,13 @@ export function simulate(base, scores, p) {
     cash += net;
     const pnl = net - pos.cost;
     trades.push({ side: pos.dir > 0 ? 'SELL' : 'COVER', exit: true, direction: pos.dir > 0 ? 'long' : 'short', time: candles[i].time, price: fill, pnl, pnlPct: (pnl / pos.cost) * 100, ret: pnl / pos.equityBefore, reason, regime: pos.regime, strategy: pos.strategy, bars: i - pos.bar });
+    pos = null;
+  };
+
+  // Liquidation: the isolated margin is lost (the exchange keeps what is left of it).
+  const liquidate = (i) => {
+    liquidations++;
+    trades.push({ side: pos.dir > 0 ? 'SELL' : 'COVER', exit: true, direction: pos.dir > 0 ? 'long' : 'short', time: candles[i].time, price: pos.liq, pnl: -pos.cost, pnlPct: -100, ret: -pos.cost / pos.equityBefore, reason: `Liquidated (${lev}x)`, regime: pos.regime, strategy: pos.strategy, bars: i - pos.bar });
     pos = null;
   };
 
@@ -157,7 +173,12 @@ export function simulate(base, scores, p) {
           pos.stopLoss = Math.min(pos.stopLoss, pos.lowest + mult * prevAtr);
         }
       }
-      if (pos.dir > 0) {
+      const long = pos.dir > 0;
+      const liqHit = pos.liq && (long ? c.low <= pos.liq : c.high >= pos.liq);
+      const gapped = pos.liq && (long ? c.open <= pos.liq : c.open >= pos.liq);
+      const stopFirst = long ? pos.stopLoss > pos.liq : pos.stopLoss < pos.liq;
+      if (liqHit && (gapped || !stopFirst)) liquidate(i);
+      else if (pos.dir > 0) {
         if (c.low <= pos.stopLoss) close(Math.min(c.open, pos.stopLoss), 'Stop-loss', i);
         else if (c.high >= pos.takeProfit) close(Math.max(c.open, pos.takeProfit), 'Take-profit', i);
       } else if (c.high >= pos.stopLoss) close(Math.max(c.open, pos.stopLoss), 'Stop-loss', i);
@@ -178,8 +199,10 @@ export function simulate(base, scores, p) {
           r *= s.atrPctile > 95 ? 0.25 : s.atrPctile > 80 ? 0.5 : 1;
         }
         const eq = cash;
-        const notional = Math.min((eq * (r / 100)) / (slDist / c.close), eq * (maxPositionPct / 100), cash * 0.995);
-        if (r > 0 && notional >= 10) {
+        // maxPositionPct and cash cap the margin, so with leverage they allow lev x the notional.
+        const notional = Math.min((eq * (r / 100)) / (slDist / c.close), eq * (maxPositionPct / 100) * lev, cash * 0.995 * lev);
+        const liqOk = !liquidation || liqDistPct(wantLong ? 1 : -1) >= 2 * (slDist / c.close) * 100;
+        if (r > 0 && notional >= 10 && liqOk) {
           const order = { side: 'OPEN', dir: wantLong ? 1 : -1, notional, slDist, tpDist, regime: s.regime, strategy: s.strategy, score: s.score, equityBefore: eq, trail: s.trail };
           if (latencyBars > 0 && i + latencyBars < to) pending = { ...order, fillBar: i + latencyBars };
           else if (latencyBars === 0) open(order.dir, c.close, order, i);
@@ -193,7 +216,9 @@ export function simulate(base, scores, p) {
   }
   if (pos) close(candles[to - 1].close, 'End of test', to - 1);
   if (equity.length) equity[equity.length - 1].value = cash;
-  return { trades, equity, metrics: computeMetrics(trades, equity, startBalance, base.interval, barsInMarket) };
+  const metrics = computeMetrics(trades, equity, startBalance, base.interval, barsInMarket);
+  if (lev > 1 || liquidation) Object.assign(metrics, { leverage: lev, liquidations });
+  return { trades, equity, metrics };
 }
 
 export function computeMetrics(trades, equity, startBalance, interval, barsInMarket = 0) {
@@ -320,6 +345,7 @@ async function runCombo(symbol, interval, opts) {
     startBalance: opts.startBalance, feeRate: opts.feeRate, slippageBps: opts.slippageBps, spreadBps: opts.spreadBps,
     latencyBars: opts.latencyBars, fundingRatePct8h: opts.fundingRatePct8h, dynamicRisk: true,
     allowShort: Boolean(opts.allowShort && opts.exchange && ex(opts.exchange).canShort),
+    leverage: opts.leverage || 1, liquidation: Boolean(opts.liquidation), mmr: ex(opts.exchange || 'binance').mmrOf?.(symbol) ?? 0.01,
   };
   let chosen = { threshold: opts.threshold, slMult: null, tpMult: null };
   let optimization = null;

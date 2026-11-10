@@ -11,7 +11,7 @@ import { STRATEGY_LIBRARY, getStrategy } from '../ai/strategies.js';
 import { baseAsset } from '../ai/util.js';
 import { entryContext, journalClosedTrade } from '../ai/journal.js';
 import { snapshotEquity, valuePortfolio } from '../ai/portfolio.js';
-import { paperOrder } from './paperBroker.js';
+import { paperOrder, settlePaperPerps, getPaperBalances } from './paperBroker.js';
 import { trailStop, trailStopShort } from './risk.js';
 import { evaluateRisk } from './riskEngine.js';
 import { buildGrid, gridActions, GRID_REGIMES, GRID_KILL_REGIMES } from './grid.js';
@@ -38,6 +38,7 @@ export const BOT_DEFAULTS = {
   trailingStop: true,
   trailAtr: 2.5,
   dailyLossLimitPct: 5,
+  leverage: 2, // perpetuals only (1-5x, isolated)
 };
 
 const userCache = new Map();
@@ -63,16 +64,18 @@ async function warnOnce(bot, key, msg) {
 
 // Executes a market order (paper or live, any supported exchange) and records the trade.
 // short=true: SELL opens a short (sized by quoteAmount), BUY covers it (by quantity). Only adapters with canShort.
-export async function executeOrder({ user, bot, mode, exchange = 'binance', symbol, side, quoteAmount, quantity, reason, signal, clientOrderId, extra = {}, short = false }) {
+// leverage: perpetuals only (opening orders); other adapters ignore it.
+export async function executeOrder({ user, bot, mode, exchange = 'binance', symbol, side, quoteAmount, quantity, reason, signal, clientOrderId, extra = {}, short = false, leverage }) {
   const info = (await symbolInfo(exchange, symbol)) || { base: baseAsset(symbol), quote: symbol.slice(baseAsset(symbol).length) };
   let fill;
   if (mode === 'live') {
     const { client } = await tradingFor(user, exchange);
-    fill = await client.marketOrder({ symbol, side, quoteAmount, quantity, clientOrderId, short });
+    fill = await client.marketOrder({ symbol, side, quoteAmount, quantity, clientOrderId, short, leverage });
   } else {
-    fill = await paperOrder({ userId: user._id, exchange, side, symbol, base: info.base, quote: info.quote, quoteAmount, quantity, short });
+    fill = await paperOrder({ userId: user._id, exchange, side, symbol, base: info.base, quote: info.quote, quoteAmount, quantity, short, leverage });
   }
-  const trade = await recordTrade({ user, bot, mode, exchange, symbol, side, fill, reason, signal, extra: short ? { ...extra, positionSide: 'short' } : extra });
+  const perpExtra = fill.leverage ? { leverage: fill.leverage, liqPrice: fill.liqPrice } : {};
+  const trade = await recordTrade({ user, bot, mode, exchange, symbol, side, fill, reason, signal, extra: { ...extra, ...perpExtra, ...(short && { positionSide: 'short' }) } });
   if (fill.sim?.partial) await log(bot || { userId: user._id }, 'warn', `Partial fill on ${symbol}: the paper book ran out of liquidity`);
   return { trade, fill, info };
 }
@@ -108,7 +111,7 @@ async function openPosition(bot, user, signal, sizing, candles, candleTime) {
   markOrder(key);
   const short = signal.signal === 'SHORT';
   const { fill, info } = await executeOrder({
-    user, bot, mode: bot.mode, exchange: bot.exchange, symbol: bot.symbol, side: short ? 'SELL' : 'BUY', quoteAmount: sizing.notional, short,
+    user, bot, mode: bot.mode, exchange: bot.exchange, symbol: bot.symbol, side: short ? 'SELL' : 'BUY', quoteAmount: sizing.notional, short, leverage: bot.leverage,
     reason: `${signal.signal} p=${(signal.probability * 100).toFixed(0)}% ${signal.quality} (${signal.strategyName})`, signal,
     clientOrderId: `nx${bot._id.slice(0, 8)}${candleTime}${short ? 'X' : 'B'}`,
   });
@@ -124,10 +127,11 @@ async function openPosition(bot, user, signal, sizing, candles, candleTime) {
     entryContext: entryContext(signal, candles),
     riskPct: sizing.riskPct,
     contract: fill.contract, contractExpiry: fill.contractExpiry || info.expiry, // futures only
+    ...(fill.leverage && { leverage: fill.leverage, liqPrice: fill.liqPrice }), // perpetuals
   };
   await db.bots.update(bot._id, { position });
   const qtyLabel = await qtyText(bot.exchange, bot.symbol, fill.qty);
-  const marginNote = fill.sim?.marginBlocked ? ` | margin ${fill.sim.marginBlocked.toFixed(0)}` : '';
+  const marginNote = (fill.sim?.marginBlocked ? ` | margin ${fill.sim.marginBlocked.toFixed(0)}` : '') + (fill.leverage ? ` | ${fill.leverage}x, liquidation ${(+fill.liqPrice).toFixed(4)}` : '');
   await log(bot, 'trade', `${short ? 'SELL SHORT' : 'BUY'} ${qtyLabel} ${info.base} @ ${fill.price.toFixed(4)} | risk ${sizing.riskPct}%${marginNote} | SL ${position.stopLoss.toFixed(4)} TP ${position.takeProfit.toFixed(4)}`);
   notify(user._id, { type: 'trade', title: `${bot.name}: ${short ? 'sold short' : 'bought'} ${info.base}`, body: `${qtyLabel} @ ${fill.price.toFixed(4)} (${bot.mode})`, important: bot.mode === 'live' });
   if (bot.copyable && !short) events.emit('copy:open', { bot, user, notional: fill.cost, equity: sizing.equity });
@@ -300,6 +304,25 @@ async function closePosition(bot, user, price, reason, signal, exitCtx = {}) {
   if (j) events.emit('journal', j);
 }
 
+// Paper perpetuals: the broker liquidated this bot's position (mark crossed the liquidation price). Attribute the
+// liquidation trade to the bot, book the loss and clear the position. Returns true when that happened.
+async function perpLiquidated(bot, user) {
+  const pos = bot.position;
+  const held = (await getPaperBalances(user._id, bot.exchange))[bot.symbol] || 0;
+  if (pos.side === 'short' ? held < 0 : held > 0) return false;
+  const liq = (await db.trades.find({ userId: user._id, mode: 'paper', exchange: bot.exchange, symbol: bot.symbol }, { sort: { time: -1 }, limit: 5 }))
+    .find((t) => t.liquidation && t.time >= (pos.openedAt || 0));
+  const pnl = liq?.pnl ?? -(pos.cost / (pos.leverage || 1));
+  if (liq) events.emit('trade', await db.trades.update(liq._id, { botId: bot._id, botName: bot.name }));
+  const stats = bot.stats || { trades: 0, wins: 0, pnl: 0 };
+  stats.trades++;
+  stats.pnl += pnl;
+  await db.bots.update(bot._id, { position: null, stats });
+  await log(bot, 'loss', `LIQUIDATED: ${bot.symbol} ${pos.side || 'long'} at ${(liq?.price ?? pos.liqPrice ?? 0).toFixed(4)} (${pos.leverage || '?'}x) - isolated margin lost, PnL ${pnl.toFixed(2)}`);
+  notify(user._id, { type: 'loss', title: `${bot.name}: position liquidated`, body: `${bot.symbol} ${pos.side || 'long'} at ${pos.leverage || '?'}x - PnL ${pnl.toFixed(2)} USDT`, important: true });
+  return true;
+}
+
 // ---- DCA ----
 async function dcaTick(bot, user, signal, price, candleTime) {
   const cfg = STRATEGY_LIBRARY.dca;
@@ -412,7 +435,7 @@ async function tick(botId) {
     bot.exchange ||= 'binance';
     const settings = await getSettings(user._id);
 
-    if (!health.exchangeUp && bot.exchange === 'binance') return warnOnce(bot, 'exchange', 'Exchange unreachable - trading paused until it recovers');
+    if (!health.exchangeUp && ['binance', 'bperp'].includes(bot.exchange)) return warnOnce(bot, 'exchange', 'Exchange unreachable - trading paused until it recovers');
     // Exchanges with trading hours (NSE forex): nothing can be traded while closed; positions are held overnight.
     const adapter = ex(bot.exchange);
     if (adapter.marketOpen && !adapter.marketOpen()) return;
@@ -443,7 +466,13 @@ async function tick(botId) {
 
     // 1. Protect the open position on every tick (runs even when auto-trading is disabled).
     // Live: on the first tick after a (re)start, check the position against the real exchange balance.
-    if (bot.position && bot.mode === 'live' && !bot.grid && !reconciled.has(botId)) {
+    // Perpetuals, paper: settle funding and liquidations; a liquidated position is gone from the wallet.
+    if (adapter.perp && bot.mode === 'paper') {
+      await settlePaperPerps(user._id, bot.exchange);
+      if (bot.position && (await perpLiquidated(bot, user))) return;
+    }
+    // Perpetuals, live: Binance can liquidate at any time, so the position is checked against the exchange every tick.
+    if (bot.position && bot.mode === 'live' && !bot.grid && (!reconciled.has(botId) || adapter.perp)) {
       reconciled.add(botId);
       await reconcileLive(bot, user, price);
       bot = await db.bots.findOne({ _id: botId });
@@ -638,6 +667,8 @@ export async function resumeRunningBots() {
       if (await db.wallet.findOne({ kind: 'paper-inr', userId: u._id })) await snapshotEquity(u, 'paper', 'zerodha').catch(() => {});
       if (await db.wallet.findOne({ kind: 'paper-nse', userId: u._id })) await snapshotEquity(u, 'paper', 'nse').catch(() => {});
       if (await db.wallet.findOne({ kind: 'paper-nfut', userId: u._id })) await snapshotEquity(u, 'paper', 'nfut').catch(() => {});
+      // Perps: valuing the account also settles funding and liquidates positions whose mark crossed liquidation.
+      if (await db.wallet.findOne({ kind: 'paper-perp', userId: u._id })) await snapshotEquity(u, 'paper', 'bperp').catch(() => {});
     }
   };
   snap();

@@ -39,7 +39,7 @@ Market data (candles, order book, trades, futures, news)
 | **Signal Engine 2.0** | Returns LONG / WAIT / EXIT with a probability, expected return after costs, expected risk, R:R, regime and quality grade. The probability is the take-profit-before-stop rate of similar past setups, adjusted toward the base rate when few setups exist. |
 | **Regime detection** | Labels the market as Bull Trend, Bear Trend, Sideways, High Volatility, Low Volatility, Breakout, Breakdown or Panic, then picks the strategy that fits (trend, mean reversion or breakout), or stands aside |
 | **Order Flow AI** | Bid/ask imbalance, spread, depth, large orders, buy/sell pressure, volume delta, liquidity walls, absorption, and possible spoofing (walls pulled before price reached them) |
-| **Futures Intelligence** | Open interest, funding rate, long/short and top-trader ratios, taker ratio, basis, liquidations (live stream), the price/OI/funding relationship, and squeeze risk. Analytics only: VelocityX never places futures orders. |
+| **Futures Intelligence** | Open interest, funding rate, long/short and top-trader ratios, taker ratio, basis, liquidations (live stream), the price/OI/funding relationship, and squeeze risk. These feed the AI signal for spot and perpetuals; perpetual trading itself is covered under "Crypto perpetual futures" below. |
 | **News Intelligence** | Cointelegraph, Decrypt and CoinDesk RSS -> NLP (Claude, or a keyword fallback) -> sentiment, impact, category and assets -> risk adjustment |
 | **Dynamic Risk Engine** | Base risk x volatility x drawdown x strategy performance x regime x news x futures x signal quality, then gates: kill switch, R:R, quality, daily loss, open positions, exposure, correlation |
 | **Portfolio AI** | Allocation, exposure, correlation matrix, annualised volatility, risk level, concentration warnings, equity curve |
@@ -87,6 +87,22 @@ Pick **Zerodha (NSE futures)** in the top-bar exchange menu. It uses the same Ki
 - **Long and short:** both are supported, one direction per symbol. Stops are SL (stop-limit) DAY orders that the engine re-places each trading day.
 - **Hours:** Mon-Fri 09:15-15:30 IST. Charges: Zerodha F&O futures (brokerage min(Rs 20, 0.03%), STT 0.02% on sells, exchange, SEBI, stamp duty and GST).
 - **Backtests** size by notional with futures costs. They do not model lots or margin.
+
+## Crypto perpetual futures (Binance USD-M)
+
+Pick **Binance (USD-M futures)** in the top-bar exchange menu. It is a separate USDT account (`PAPER_PERPS_START_BALANCE`, default 10000), apart from spot crypto.
+
+- **Instruments:** every USDT-margined perpetual (BTCUSDT, ETHUSDT and so on). Long and short, one direction per symbol.
+- **Leverage:** per bot, 1x to 5x (default 2x), always **isolated** margin in **one-way** position mode. A position blocks notional / leverage as margin. The Risk page's **Max futures leverage** caps total notional / equity across the account.
+- **Liquidation safety:** the risk engine refuses an entry unless the liquidation price is at least twice as far from the entry as the stop. Funding paid against the trade's direction (above 0.05% per 8h) cuts the risk budget.
+- **Orders:** opening orders are MARKET orders sized by notional. Closing orders are **reduce-only**, so a close can never flip the position. The exchange stop is a reduce-only STOP_MARKET triggered on the **mark price**. On accounts where Binance moved stop orders to its Algo order service, the adapter places them through that service instead.
+- **Paper realism:** fills walk the live futures order book with the 0.05% taker fee. Real funding rates are settled every 8 hours. When the mark price crosses the isolated liquidation price, the position is liquidated and loses its whole margin. The liquidation is written to the trade history and the bot's log.
+- **Live:** every tick, the position is checked against Binance (liquidations and manual closes are detected). The liquidation price shown is the one Binance reports.
+- **Backtests** use futures candles, funding and the chosen leverage. They simulate liquidation and skip entries that fail the liquidation-buffer rule.
+
+**Setup (live):** create USD-M futures API keys with **Futures enabled and withdrawals disabled**, then add them under **Account → Exchange connections → Binance (USD-M futures)**. Practise on the futures testnet first: its keys come from https://testnet.binancefuture.com and differ from spot testnet keys. Switch the Binance account to **One-way** position mode. Check that Binance futures are allowed for your account and country. The owner can instead put keys in `server/.env`: `BINANCE_FUTURES_API_KEY`, `BINANCE_FUTURES_API_SECRET`, `BINANCE_FUTURES_TESTNET=true` (`false` = real money).
+
+Manual orders on a futures account obey the same total-leverage cap as bots (**Risk → Max futures leverage**, default 3x).
 
 ## Forex (Zerodha)
 

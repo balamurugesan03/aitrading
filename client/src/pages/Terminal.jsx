@@ -77,14 +77,16 @@ function OrderPanel({ symbol, price, onDone, exchange, lot, marginRate }) {
   const quote = quoteOf(symbol);
   const LOT = fx ? 1000 : futures ? lot || 1 : 1; // currency futures: 1 lot = 1,000 units; NSE futures: the contract's lot; stocks: whole shares
   const lotted = fx || futures;
-  const mRate = futures ? marginRate || 1 : 1; // NSE futures block only this share of notional as margin
+  const perps = exInfo?.market === 'perps';
+  const [leverage, setLeverage] = useState(exInfo?.defaultLeverage || 2);
+  const mRate = futures ? marginRate || 1 : perps ? 1 / leverage : 1; // margin accounts block only this share of notional
   const [side, setSide] = useState('BUY'); // BUY | SELL | SHORT | COVER (the last two: forex futures only)
   const [amount, setAmount] = useState(inr ? '100000' : '100');
   const [busy, setBusy] = useState(false);
   const [portfolio, , reload] = usePoll(`/portfolio?mode=${mode}&exchange=${exchange}`, 0, [mode, exchange]);
   useEffect(() => { setSide('BUY'); setAmount(inr ? '100000' : '100'); }, [inr]);
   const base = baseOf(symbol);
-  const heldAsset = inr ? symbol : base; // NSE accounts hold the pair / stock itself (units / shares)
+  const heldAsset = inr || perps ? symbol : base; // NSE accounts hold the pair / stock itself (units / shares)
   const usdt = portfolio?.assets.find((a) => a.asset === quote)?.amount || 0;
   const heldRow = portfolio?.assets.find((a) => a.asset === heldAsset);
   const held = Math.max(0, heldRow?.amount || 0);
@@ -97,7 +99,7 @@ function OrderPanel({ symbol, price, onDone, exchange, lot, marginRate }) {
     try {
       const short = side === 'SHORT' || side === 'COVER';
       const apiSide = side === 'SHORT' ? 'SELL' : side === 'COVER' ? 'BUY' : side;
-      const body = opening ? { symbol, side: apiSide, mode, exchange, short, quoteAmount: +amount } : { symbol, side: apiSide, mode, exchange, short, quantity: +amount };
+      const body = opening ? { symbol, side: apiSide, mode, exchange, short, quoteAmount: +amount, ...(perps && { leverage }) } : { symbol, side: apiSide, mode, exchange, short, quantity: +amount };
       const t = await api.post('/trade', body);
       toast(`${side} ${lotted ? `${t.qty / LOT} lot(s)` : stocks ? `${t.qty} share(s)` : fmtQty(t.qty)} ${inr ? symbol : base} @ ${fmtPrice(t.price)} (${mode})`);
       reload();
@@ -111,9 +113,14 @@ function OrderPanel({ symbol, price, onDone, exchange, lot, marginRate }) {
   return (
     <div className="col" style={{ gap: 12 }}>
       <Seg value={side} onChange={(s) => { setSide(s); setAmount(s === 'BUY' || s === 'SHORT' ? (inr ? '100000' : '100') : String(s === 'COVER' ? shortHeld : held ? +held.toFixed(6) : '')); }} options={[{ value: 'BUY', label: 'Buy' }, { value: 'SELL', label: 'Sell' }, ...(exInfo?.canShort ? [{ value: 'SHORT', label: 'Short' }, { value: 'COVER', label: 'Cover' }] : [])]} />
-      <Field label={opening ? (futures ? `Notional (${quote})` : `Amount (${quote})`) : lotted ? `Quantity (units, 1 lot = ${LOT})` : stocks ? 'Quantity (shares)' : `Quantity (${base})`} hint={opening ? `${futures ? 'Free margin' : 'Available'}: ${money(usdt)}` : side === 'COVER' ? `Short: ${fmtQty(shortHeld)} units (${shortHeld / LOT} lots)` : `Holding: ${fmtQty(held)} ${lotted ? `units (${held / LOT} lots)` : stocks ? 'shares' : base}`}>
+      <Field label={opening ? (futures || perps ? `Notional (${quote})` : `Amount (${quote})`) : lotted ? `Quantity (units, 1 lot = ${LOT})` : stocks ? 'Quantity (shares)' : `Quantity (${base})`} hint={opening ? `${futures || perps ? 'Free margin' : 'Available'}: ${money(usdt)}` : side === 'COVER' ? `Short: ${fmtQty(shortHeld)} units (${shortHeld / LOT} lots)` : `Holding: ${fmtQty(held)} ${lotted ? `units (${held / LOT} lots)` : stocks ? 'shares' : base}`}>
         <input className="input mono" value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" />
       </Field>
+      {perps && opening && (
+        <Field label="Leverage (isolated)" hint={heldRow?.leverage ? `Open position uses ${heldRow.leverage}x - adds keep that leverage` : 'Higher leverage = liquidation closer to entry'}>
+          <Seg value={leverage} onChange={setLeverage} options={Array.from({ length: exInfo?.maxLeverage || 5 }, (_, k) => ({ value: k + 1, label: `${k + 1}x` }))} />
+        </Field>
+      )}
       <div className="row" style={{ gap: 6 }}>
         {[25, 50, 75, 100].map((p) => (
           <button key={p} className="btn sm" style={{ flex: 1 }} onClick={() => setAmount(opening ? String(Math.floor((usdt * p) / mRate) / 100) : String(+(((side === 'COVER' ? shortHeld : held) * p) / 100).toFixed(6)))}>{p}%</button>
@@ -122,12 +129,15 @@ function OrderPanel({ symbol, price, onDone, exchange, lot, marginRate }) {
       <div className="kv small">
         <span>Est. {opening ? 'quantity' : 'value'}</span>
         <span>{price ? (opening ? (inr ? `${lotsFor(+amount)} ${lotted ? 'lot(s)' : 'share(s)'} · ${money(lotsFor(+amount) * LOT * price)}${futures ? ` · margin ~${money(lotsFor(+amount) * LOT * price * mRate, 0)}` : ''}` : `${fmtQty(+amount / price)} ${base}`) : money(+amount * price)) : '—'}</span>
+        {perps && opening && price > 0 && +amount > 0 && <><span>Margin · liquidation</span><span>{money(+amount / leverage)} · ~{fmtPrice(side === 'SHORT' ? (price * (1 + 1 / leverage)) / 1.01 : (price * (1 - 1 / leverage)) / 0.99)}</span></>}
+        {perps && heldRow?.liqPrice && <><span>Open position</span><span>{heldRow.side} {heldRow.leverage}x · liq {fmtPrice(heldRow.liqPrice)}</span></>}
         <span>Mode</span><span className={mode === 'live' ? 'down' : 'up'}>{mode.toUpperCase()}</span>
       </div>
       <button className={`btn block ${side === 'BUY' || side === 'COVER' ? 'buy' : 'sell'}`} disabled={busy || !(+amount > 0)} onClick={submit}>
         {busy ? <Spinner /> : <ShoppingCart size={15} />} {side} {inr ? symbol : base} · {inr ? 'Marketable limit' : 'Market'}
       </button>
       {fx && <div className="tiny dim">NSE currency futures (near month), whole lots only, Mon-Fri 09:00-17:00 IST. The bot never uses leverage: a lot needs its full notional in the account.</div>}
+      {perps && <div className="tiny dim">Binance USD-M perpetual, isolated margin, one-way mode. Enter the notional; it blocks notional / leverage as margin. Funding is paid or received every 8 hours. If the mark price reaches the liquidation price the position and its margin are lost - keep the stop well before it.</div>}
       {futures && <div className="tiny dim">NSE {symbol} futures (near month, rolled 2 days before expiry), whole lots of {LOT} units, Mon-Fri 09:15-15:30 IST. Enter the notional: a position blocks about {(mRate * 100).toFixed(0)}% of it as margin (live orders use Zerodha's exact margin).</div>}
       {stocks && <div className="tiny dim">NSE delivery (CNC), whole shares, Mon-Fri 09:15-15:30 IST. Selling shares you hold needs DDPI enabled on your Zerodha account.</div>}
     </div>
@@ -208,7 +218,7 @@ export default function Terminal() {
                 <div><div className="tiny dim">24h Change</div><div className={`mono bold ${tone(ticker?.change)}`}>{fmtPct(ticker?.change)}</div></div>
                 <div><div className="tiny dim">24h High</div><div className="mono">{fmtPrice(ticker?.high)}</div></div>
                 <div><div className="tiny dim">24h Low</div><div className="mono">{fmtPrice(ticker?.low)}</div></div>
-                <div><div className="tiny dim">24h Volume</div><div className="mono">{market === 'crypto' ? '$' : '₹'}{fmtCompact(ticker?.volume)}</div></div>
+                <div><div className="tiny dim">24h Volume</div><div className="mono">{market === 'crypto' || market === 'perps' ? '$' : '₹'}{fmtCompact(ticker?.volume)}</div></div>
               </div>
             </div>
             <Seg value={interval} onChange={setInterval} options={intervals} />
@@ -243,10 +253,10 @@ export default function Terminal() {
         </div>
 
         <div className="card">
-          <Tabs value={intelTab} onChange={setIntelTab} tabs={market !== 'crypto' ? [{ value: 'book', label: 'Market Depth' }, { value: 'flow', label: 'Order Flow AI' }] : [{ value: 'book', label: 'Order Book' }, { value: 'flow', label: 'Order Flow AI' }, { value: 'futures', label: 'Futures Intelligence' }, { value: 'news', label: 'News AI' }]} />
+          <Tabs value={intelTab} onChange={setIntelTab} tabs={market !== 'crypto' && market !== 'perps' ? [{ value: 'book', label: 'Market Depth' }, { value: 'flow', label: 'Order Flow AI' }] : [{ value: 'book', label: 'Order Book' }, { value: 'flow', label: 'Order Flow AI' }, { value: 'futures', label: 'Futures Intelligence' }, { value: 'news', label: 'News AI' }]} />
           {intelTab === 'flow' && <OrderFlowPanel symbol={symbol} exchange={exchange} />}
-          {intelTab === 'futures' && market === 'crypto' && <FuturesPanel symbol={symbol} />}
-          {intelTab === 'news' && market === 'crypto' && <NewsPanel asset={baseOf(symbol)} />}
+          {intelTab === 'futures' && (market === 'crypto' || market === 'perps') && <FuturesPanel symbol={symbol} />}
+          {intelTab === 'news' && (market === 'crypto' || market === 'perps') && <NewsPanel asset={baseOf(symbol)} />}
           {intelTab === 'book' && <OrderBook symbol={symbol} exchange={exchange} />}
         </div>
 

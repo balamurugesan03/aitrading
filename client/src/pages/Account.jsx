@@ -168,7 +168,7 @@ function Connections() {
         <div className="card-title">Add connection</div>
         <Field label="Exchange">
           <select className="select" value={f.exchange} onChange={set('exchange')}>
-            {(exchanges || []).filter((e) => e.trading && !e.connection).map((e) => <option key={e.id} value={e.id}>{e.id === 'zerodha' ? 'Zerodha Kite (NSE forex + stocks)' : e.name}</option>)}
+            {(exchanges || []).filter((e) => e.trading && !e.connection).map((e) => <option key={e.id} value={e.id}>{e.id === 'zerodha' ? 'Zerodha Kite (NSE forex, stocks, futures)' : e.id === 'bperp' ? 'Binance USD-M futures (own keys: futures testnet keys differ from spot)' : e.name}</option>)}
           </select>
         </Field>
         {f.exchange === 'zerodha' && <div className="alert info small">Create a Kite Connect app at developers.kite.trade and paste its <b>API key</b> and <b>API secret</b>. After saving, click "Log in to Kite" above. Indian residents may trade only INR currency pairs on NSE.</div>}

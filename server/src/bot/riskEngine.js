@@ -4,7 +4,7 @@
 import { db } from '../db/index.js';
 import { getSettings, updateSettings } from './safety.js';
 import { valuePortfolio, correlation, fxCorrelation } from '../ai/portfolio.js';
-import { symbolInfo, isFx, isMargin, marginRateFor, accountOf } from '../exchange/index.js';
+import { symbolInfo, isFx, isMargin, marginRateFor, accountOf, ex } from '../exchange/index.js';
 import { REGIMES } from '../ai/regime.js';
 import { baseAsset } from '../ai/util.js';
 import { startOfDay } from './risk.js';
@@ -41,7 +41,7 @@ export async function accountState(user, mode, exchange = 'binance') {
   const settings = await getSettings(user._id);
   const account = accountOf(exchange);
   const pf = await valuePortfolio(user, mode, exchange);
-  const peakKey = { crypto: mode, fx: `${mode}Fx`, stocks: `${mode}Stocks`, futures: `${mode}Futures` }[account];
+  const peakKey = { crypto: mode, fx: `${mode}Fx`, stocks: `${mode}Stocks`, futures: `${mode}Futures`, perps: `${mode}Perps` }[account];
   const peak = Math.max(settings.peakEquity[peakKey] || 0, pf.total);
   if (peak > (settings.peakEquity[peakKey] || 0)) await updateSettings(user._id, { peakEquity: { [peakKey]: peak } });
   const trades = (await db.trades.find({ mode, userId: user._id })).filter((t) => accountOf(t.exchange) === account);
@@ -62,7 +62,8 @@ export async function accountState(user, mode, exchange = 'binance') {
  * @param signal  output of analyze()
  * @param opts    { bot, mode, account (optional precomputed) }
  */
-export async function evaluateRisk(signal, { user, bot = null, mode = 'paper', account, exchange = 'binance' } = {}) {
+export async function evaluateRisk(signal, opts = {}) {
+  const { user, bot = null, mode = 'paper', account, exchange = 'binance' } = opts;
   const settings = await getSettings(user._id);
   const R = settings.risk;
   const acct = account || (await accountState(user, mode, exchange));
@@ -104,6 +105,13 @@ export async function evaluateRisk(signal, { user, bot = null, mode = 'paper', a
   const macro = await macroEventRisk().catch(() => null);
   if (macro) step('Macro calendar', macro.multiplier, macro.note);
   // 6. Futures leverage
+  // 6b. Perpetuals: funding paid against the trade's direction (longs pay a positive rate, shorts a negative one).
+  const perp = ex(exchange).perp;
+  const fundingPct = signal.futures?.fundingRatePct;
+  if (perp && Number.isFinite(fundingPct)) {
+    const against = signal.signal === 'SHORT' ? -fundingPct : fundingPct; // % per 8h this position would pay
+    step('Funding cost', against > 0.1 ? 0.5 : against > 0.05 ? 0.75 : 1, `Funding ${fundingPct.toFixed(4)}% per 8h - this ${signal.signal === 'SHORT' ? 'short' : 'long'} would ${against > 0 ? 'pay' : 'receive'} it`);
+  }
   if (signal.futures?.available) step('Futures leverage', signal.futures.squeezeRisk ? 0.75 : 1, signal.futures.squeezeRisk ? 'Squeeze risk detected' : signal.futures.relationship);
   // 7. Signal quality
   step('Signal quality', QUALITY_FACTOR[signal.quality] ?? 0, `Grade ${signal.quality} (edge ${signal.edgeR}R per trade)`);
@@ -127,11 +135,11 @@ export async function evaluateRisk(signal, { user, bot = null, mode = 'paper', a
   gate('Open positions', openCount < R.maxOpenPositions, `${openCount} open (max ${R.maxOpenPositions})`);
 
   // Correlation with what is already held
-  const asset = baseAsset(signal.symbol);
+  const asset = isMargin(exchange) ? signal.symbol : baseAsset(signal.symbol); // margin accounts hold the symbol itself
   // A short only concentrates risk with other shorts (a long in a correlated pair is a hedge), and vice versa.
   const wantSide = signal.signal === 'SHORT' ? 'short' : 'long';
   const others = acct.holdings.filter((h) => h.asset !== asset && (h.side || 'long') === wantSide);
-  const corrOf = isFx(exchange) ? (a, b) => fxCorrelation(exchange, a, b) : correlation;
+  const corrOf = isFx(exchange) || isMargin(exchange) ? (a, b) => fxCorrelation(exchange, a, b) : correlation;
   const corrs = await Promise.all(others.map(async (h) => ({ asset: h.asset, corr: await corrOf(asset, h.asset).catch(() => 0), value: h.value })));
   const correlated = corrs.filter((c) => c.corr >= R.correlationLimit);
   gate('Correlation', correlated.length < R.maxCorrelatedPositions,
@@ -145,7 +153,8 @@ export async function evaluateRisk(signal, { user, bot = null, mode = 'paper', a
   // apply to the margin a position blocks, so each is converted to notional by dividing by the margin rate.
   // The stop-based size above already limits the loss to `risk`% of equity; the leverage cap bounds the rest.
   const margin = isMargin(exchange);
-  const rate = margin ? marginRateFor(exchange, signal.symbol, info) : 1;
+  const leverage = perp ? ex(exchange).clampLeverage(bot?.leverage ?? opts.leverage) : null;
+  const rate = margin ? marginRateFor(exchange, signal.symbol, info, leverage) : 1;
   const maxPos = (acct.equity * ((bot?.maxPositionPct ?? 25) / 100)) / rate;
   const headroom = Math.max(0, acct.equity * (R.maxExposurePct / 100) - (acct.equity * acct.exposurePct) / 100) / rate;
   const leverageRoom = margin ? Math.max(0, acct.equity * R.maxLeverage - (acct.margin?.notional || 0)) : Infinity;
@@ -156,6 +165,15 @@ export async function evaluateRisk(signal, { user, bot = null, mode = 'paper', a
     const lev = acct.equity > 0 ? ((acct.margin?.notional || 0) + notional) / acct.equity : Infinity;
     gate('Leverage', leverageRoom >= minNotional, `${lev.toFixed(2)}x after this trade (max ${R.maxLeverage}x), margin ${(rate * 100).toFixed(0)}% of notional`);
   }
+  // Perpetuals: the stop must sit well inside the liquidation price, so the stop - not a liquidation - ends a loser.
+  let liq = null;
+  if (perp) {
+    const side = signal.signal === 'SHORT' ? 'short' : 'long';
+    const liqDist = ex(exchange).liquidationDistancePct(leverage, side, signal.symbol);
+    liq = { leverage, distancePct: +liqDist.toFixed(2), price: ex(exchange).liquidationPrice(signal.price, leverage, side, signal.symbol) };
+    gate('Liquidation buffer', liqDist >= 2 * (signal.expectedRiskPct || Infinity),
+      `Stop ${(signal.expectedRiskPct ?? 0).toFixed(2)}% away, liquidation ${liqDist.toFixed(2)}% away at ${leverage}x (needs 2x the stop distance)`);
+  }
   gate('Position size', notional >= minNotional, `${notional.toFixed(2)} ${acct.currency || 'USDT'} (min ${minNotional.toFixed(2)}${info?.stepSize > 1 ? ' = 1 lot' : ''})`);
 
   const approved = gates.every((g) => g.pass);
@@ -165,7 +183,7 @@ export async function evaluateRisk(signal, { user, bot = null, mode = 'paper', a
     rejectedBy: gates.filter((g) => !g.pass).map((g) => g.name),
     finalRiskPct: +risk.toFixed(3),
     steps, gates,
-    position: approved ? { notional: +notional.toFixed(2), riskAmount: +riskAmount.toFixed(2), qty: notional / signal.price, ...(margin && { margin: +(notional * rate).toFixed(2), marginRate: rate }) } : null,
+    position: approved ? { notional: +notional.toFixed(2), riskAmount: +riskAmount.toFixed(2), qty: notional / signal.price, ...(margin && { margin: +(notional * rate).toFixed(2), marginRate: rate }), ...(liq && { leverage: liq.leverage, liqPrice: liq.price, liqDistancePct: liq.distancePct }) } : null,
     account: { currency: acct.currency || 'USDT', equity: +acct.equity.toFixed(2), drawdownPct: +acct.drawdownPct.toFixed(2), exposurePct: +acct.exposurePct.toFixed(1), openPositions: openCount },
     strategyPerformance: perf,
   };

@@ -78,7 +78,7 @@ export function AppProvider({ children }) {
     if (market === 'forex' && !FX_PAIRS.includes(symbol)) setSymbol('USDINR');
     if (market === 'stocks' && (FX_PAIRS.includes(symbol) || INDEX_FUTURES.includes(symbol) || isCryptoSymbol(symbol))) setSymbol('RELIANCE');
     if (market === 'futures' && (FX_PAIRS.includes(symbol) || isCryptoSymbol(symbol))) setSymbol('NIFTY');
-    if (market === 'crypto' && !isCryptoSymbol(symbol)) setSymbol('BTCUSDT');
+    if ((market === 'crypto' || market === 'perps') && !isCryptoSymbol(symbol)) setSymbol('BTCUSDT');
     if (!exInfo.intervals.includes(interval)) setInterval_(exInfo.intervals.includes('15m') ? '15m' : exInfo.intervals[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exInfo?.id]);

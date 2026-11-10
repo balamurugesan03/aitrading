@@ -18,6 +18,7 @@ const WALLETS = {
   stocks: { kind: 'paper-nse', quote: 'INR', start: () => config.paperStocksStartBalance },
   options: { kind: 'paper-nfo', quote: 'INR', start: () => config.paperOptionsStartBalance },
   futures: { kind: 'paper-nfut', quote: 'INR', start: () => config.paperFuturesStartBalance },
+  perps: { kind: 'paper-perp', quote: 'USDT', start: () => config.paperPerpsStartBalance },
 };
 export const walletFor = (exchange) => WALLETS[accountOf(exchange)];
 
@@ -40,7 +41,7 @@ export async function getPaperMargin(userId, exchange) {
 export async function resetPaperWallet(userId, amount, exchange = 'binance') {
   const W = walletFor(exchange);
   const w = await wallet(userId, exchange);
-  return db.wallet.update(w._id, { balances: { [W.quote]: amount ?? W.start() }, margin: {} });
+  return db.wallet.update(w._id, { balances: { [W.quote]: amount ?? W.start() }, margin: {}, perps: {} });
 }
 
 // Walks one side of the book. For BUY `amount` is quote to spend; for SELL it is base quantity.
@@ -67,7 +68,7 @@ function walkBook(levels, side, amount) {
   return { filledQty, cost, remaining, levelsUsed };
 }
 
-export async function paperOrder({ userId, exchange = 'binance', side, symbol, base, quote, quoteAmount, quantity, short = false }) {
+export async function paperOrder({ userId, exchange = 'binance', side, symbol, base, quote, quoteAmount, quantity, short = false, leverage }) {
   const latency = Math.round(LATENCY_MS[0] + Math.random() * (LATENCY_MS[1] - LATENCY_MS[0]));
   await sleep(latency);
   if (Math.random() < REJECT_RATE) throw new Error('Simulated exchange rejection (paper trading realism) - retry later');
@@ -85,6 +86,7 @@ export async function paperOrder({ userId, exchange = 'binance', side, symbol, b
   const w = await wallet(userId, exchange);
   const b = { ...w.balances };
   if (short && !adapter.canShort) throw new Error(`${adapter.name} cannot be sold short`);
+  if (adapter.perp) return perpOrder({ adapter, w, b, book, mid, side, symbol, base, quote, quoteAmount, quantity, exchange, latency, short, leverage });
   if (adapter.margin) return marginOrder({ adapter, w, b, book, mid, side, symbol, base, quote, quoteAmount, quantity, exchange, latency, short });
   if (adapter.lotUnits) return lotOrder({ adapter, w, b, book, mid, side, base, quote, quoteAmount, quantity, exchange, latency, short });
 
@@ -222,16 +224,157 @@ async function marginOrder({ adapter, w, b, book, mid, side, symbol, base, quote
 }
 
 // Paper equity of a lot/margin wallet: cash + signed units x price (`known` supplies prices already at hand).
-async function paperEquity(adapter, balances, known = {}) {
-  const held = Object.keys(balances).filter((k) => k !== 'INR' && balances[k] !== 0 && known[k] === undefined);
+async function paperEquity(adapter, balances, known = {}, quote = 'INR') {
+  const held = Object.keys(balances).filter((k) => k !== quote && balances[k] !== 0 && known[k] === undefined);
   const tickers = held.length ? await adapter.getTickers(held) : [];
   const px = (a) => known[a] ?? tickers.find((t) => t.symbol === a)?.price;
-  let equity = balances.INR || 0;
+  let equity = balances[quote] || 0;
   for (const [a, u] of Object.entries(balances)) {
-    if (a === 'INR' || !u) continue;
+    if (a === quote || !u) continue;
     const p = px(a);
-    if (!(p > 0)) throw new Error(`No price for ${a} - cannot value the futures account`);
+    if (!(p > 0)) throw new Error(`No price for ${a} - cannot value the margin account`);
     equity += u * p;
   }
   return equity;
+}
+
+// ---- Perpetual futures (Binance USD-M): leveraged, isolated margin, funding, liquidation ----
+// Wallet: balances { USDT, SYMBOL: signed qty }, margin { SYMBOL: isolated margin }, and perps { SYMBOL: { side,
+// entry, leverage, liqPrice, cost, fundingAt, fundingPaid } }. Cash carries the signed flows like the NSE futures
+// wallet (equity = cash + signed qty x price). Leverage is fixed per symbol while a position is open (as on
+// Binance); adding to a position averages the entry and moves the liquidation price.
+const floorStep = (qty, step) => Math.floor(qty / step + 1e-9) * step;
+
+async function perpOrder({ adapter, w, b, book, mid, side, symbol, base, quote, quoteAmount, quantity, exchange, latency, short = false, leverage }) {
+  const info = (await adapter.getSymbols()).find((x) => x.symbol === symbol);
+  if (!info) throw new Error(`${symbol} is not a perpetual on ${adapter.name}`);
+  const levels = side === 'BUY' ? book.asks : book.bids;
+  const margin = { ...(w.margin || {}) };
+  const perps = { ...(w.perps || {}) };
+  const m = perps[base];
+  const held = b[base] || 0;
+  const opening = short ? side === 'SELL' : side === 'BUY';
+  const feeRate = adapter.costs.feeRate;
+  let qty;
+  if (opening) {
+    if (short ? held > 0 : held < 0) throw new Error(`Close the ${base} ${held > 0 ? 'long' : 'short'} before opening a ${short ? 'short' : 'long'}`);
+    const lev = m?.leverage ?? adapter.clampLeverage(leverage);
+    const px = levels[0][0];
+    const free = (await paperEquity(adapter, b, { [base]: mid }, quote)) - Object.values(margin).reduce((s, v) => s + v, 0);
+    const maxQty = free / (px * (1 / lev + feeRate) * 1.002);
+    qty = floorStep(Math.min(quoteAmount / px, maxQty), info.stepSize);
+    if (quoteAmount < info.minNotional) throw new Error(`Order is below the ${symbol} minimum (${info.minNotional} ${quote} notional)`);
+    if (qty * px < info.minNotional || qty < info.minQty) throw new Error(`Not enough free margin: ${info.minNotional} ${quote} notional at ${lev}x needs about ${(info.minNotional / lev).toFixed(2)} ${quote}, free ${Math.max(0, free).toFixed(2)} ${quote}`);
+    const fill = fillQty(levels, qty, side);
+    const fee = fill.gross * feeRate;
+    const total = Math.abs(held) + qty;
+    const entry = m ? (Math.abs(held) * m.entry + fill.gross) / total : fill.gross / qty;
+    const pSide = short ? 'short' : 'long';
+    b[base] = held + (side === 'BUY' ? qty : -qty);
+    b[quote] = (b[quote] || 0) + (side === 'SELL' ? fill.gross - fee : -(fill.gross + fee));
+    margin[base] = (margin[base] || 0) + fill.gross / lev;
+    perps[base] = {
+      side: pSide, entry, leverage: lev, liqPrice: adapter.liquidationPrice(entry, lev, pSide, symbol),
+      cost: (m?.cost || 0) + (side === 'BUY' ? fill.gross + fee : fill.gross - fee),
+      fundingAt: m?.fundingAt ?? Date.now(), fundingPaid: m?.fundingPaid || 0, openedAt: m?.openedAt || Date.now(),
+    };
+    await db.wallet.update(w._id, { balances: b, margin, perps });
+    const price = fill.gross / qty;
+    return {
+      qty, price, cost: side === 'BUY' ? fill.gross + fee : fill.gross - fee, fee, leverage: lev, liqPrice: perps[base].liqPrice,
+      sim: { exchange, latencyMs: latency, midPrice: mid, slippageBps: +(((side === 'BUY' ? price - mid : mid - price) / mid) * 10000).toFixed(2), levels: fill.levelsUsed, partial: false, marginBlocked: +(fill.gross / lev).toFixed(2), leverage: lev, liqPrice: +perps[base].liqPrice.toFixed(6) },
+    };
+  }
+  const have = short ? Math.max(0, -held) : Math.max(0, held);
+  qty = quantity >= have * 0.999 ? have : floorStep(Math.min(quantity, have), info.stepSize); // a full close takes the dust too
+  if (!(qty > 0)) throw new Error(`No ${base} ${short ? 'short' : 'long'} futures position to ${short ? 'cover' : 'sell'}`);
+  const fill = fillQty(levels, qty, side);
+  const fee = fill.gross * feeRate;
+  closePerpBooks({ b, margin, perps, base, quote, qty, have, side, gross: fill.gross, fee });
+  await db.wallet.update(w._id, { balances: b, margin, perps });
+  const price = fill.gross / qty;
+  return {
+    qty, price, cost: side === 'BUY' ? fill.gross + fee : fill.gross - fee, fee,
+    sim: { exchange, latencyMs: latency, midPrice: mid, slippageBps: +(((side === 'BUY' ? price - mid : mid - price) / mid) * 10000).toFixed(2), levels: fill.levelsUsed, partial: false },
+  };
+}
+
+// Fills `qty` through the book; anything beyond the fetched depth fills 5 bps past the last level.
+function fillQty(levels, qty, side) {
+  const walk = walkBook(levels, 'SELL', qty);
+  let gross = walk.cost;
+  if (walk.remaining > 0) gross += walk.remaining * levels.at(-1)[0] * (side === 'BUY' ? 1.0005 : 0.9995);
+  return { gross, levelsUsed: walk.levelsUsed };
+}
+
+// Books a (partial) close of `qty` out of `have`: cash flow, released margin, remaining cost basis.
+function closePerpBooks({ b, margin, perps, base, quote, qty, have, side, gross, fee }) {
+  const share = qty / have;
+  b[base] = (b[base] || 0) + (side === 'BUY' ? qty : -qty);
+  if (Math.abs(b[base]) < 1e-12) delete b[base];
+  b[quote] = (b[quote] || 0) + (side === 'SELL' ? gross - fee : -(gross + fee));
+  if (b[base] === undefined) {
+    delete margin[base];
+    delete perps[base];
+  } else {
+    margin[base] = (margin[base] || 0) * (1 - share);
+    perps[base] = { ...perps[base], cost: perps[base].cost * (1 - share) };
+  }
+}
+
+export async function getPaperPerps(userId, exchange) {
+  return (await wallet(userId, exchange)).perps || {};
+}
+
+// Settles a paper perps account: credits/debits every funding payment since the last settlement (real Binance
+// funding rates) and liquidates any position whose mark price crossed its liquidation price. A liquidation fills
+// at the liquidation price and the rest of the isolated margin goes as the liquidation fee, so the position loses
+// its whole margin, as on Binance. Each liquidation is written to the trade history. Throttled to every 30 s.
+const lastSettle = new Map();
+export async function settlePaperPerps(userId, exchange, { force = false } = {}) {
+  const adapter = ex(exchange);
+  const none = { liquidated: [], funding: [] };
+  if (!adapter.perp) return none;
+  const key = `${userId}:${exchange}`;
+  if (!force && Date.now() - (lastSettle.get(key) || 0) < 30000) return none;
+  lastSettle.set(key, Date.now());
+  const w = await wallet(userId, exchange);
+  const quote = walletFor(exchange).quote;
+  const b = { ...w.balances };
+  const margin = { ...(w.margin || {}) };
+  const perps = { ...(w.perps || {}) };
+  const out = { liquidated: [], funding: [] };
+  for (const [sym, m0] of Object.entries(perps)) {
+    const m = { ...m0 };
+    perps[sym] = m;
+    const qty = b[sym] || 0;
+    if (!qty) { delete perps[sym]; delete margin[sym]; continue; }
+    for (const f of await adapter.fundingSince(sym, m.fundingAt).catch(() => [])) {
+      const mark = f.markPrice || (await adapter.getPrice(sym));
+      const pay = qty * mark * f.rate; // longs pay a positive rate, shorts receive it
+      b[quote] = (b[quote] || 0) - pay;
+      m.fundingPaid = (m.fundingPaid || 0) + pay;
+      m.fundingAt = f.time;
+      out.funding.push({ symbol: sym, amount: -pay, rate: f.rate, time: f.time });
+    }
+    const { mark } = await adapter.getMarkPrice(sym);
+    const hit = m.side === 'short' ? mark >= m.liqPrice : mark <= m.liqPrice;
+    if (!hit) continue;
+    const have = Math.abs(qty);
+    const side = m.side === 'short' ? 'BUY' : 'SELL';
+    const gross = have * m.liqPrice;
+    const moveLoss = m.side === 'short' ? gross - have * m.entry : have * m.entry - gross;
+    const fee = Math.max(0, (margin[sym] || 0) - moveLoss); // what is left of the isolated margin
+    const cost = m.cost;
+    closePerpBooks({ b, margin, perps, base: sym, quote, qty: have, have, side, gross, fee });
+    const proceeds = side === 'SELL' ? gross - fee : gross + fee;
+    const pnl = side === 'SELL' ? proceeds - cost : cost - proceeds;
+    const trade = await db.trades.insert({
+      userId, botId: null, botName: 'Liquidation', mode: 'paper', exchange, symbol: sym, side, qty: have, price: m.liqPrice, cost: proceeds, fee,
+      pnl, pnlPct: (pnl / Math.abs(cost)) * 100, reason: `Liquidated at ${m.leverage}x (mark ${mark})`, positionSide: m.side, liquidation: true, time: Date.now(),
+    });
+    out.liquidated.push({ symbol: sym, side: m.side, qty: have, price: m.liqPrice, pnl, trade });
+  }
+  await db.wallet.update(w._id, { balances: b, margin, perps });
+  return out;
 }

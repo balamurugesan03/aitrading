@@ -19,6 +19,8 @@ const STOCK_DEFAULTS = { symbols: ['RELIANCE'], intervals: ['1h'], candles: 3000
 const FUTURES = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY', 'RELIANCE', 'HDFCBANK'];
 // NSE futures: ~0.02% per side (brokerage cap + STT on sells), tight spreads. The backtest sizes by notional (no lots/margin).
 const FUTURES_DEFAULTS = { symbols: ['NIFTY'], intervals: ['15m'], candles: 1500, startBalance: 2500000, feePct: 0.02, slippageBps: 1, spreadBps: 1 };
+// Binance USD-M perpetuals: 0.05% taker, funding ~0.01% per 8h, 2x isolated leverage with liquidation simulated.
+const PERP_DEFAULTS = { symbols: ['BTCUSDT'], intervals: ['1h'], candles: 3000, startBalance: 10000, feePct: 0.05, slippageBps: 2, spreadBps: 1, fundingRatePct8h: 0.01, leverage: 2 };
 const FX_DEFAULTS = { symbols: ['USDINR'], intervals: ['1h'], candles: 1500, startBalance: 1000000, feePct: 0.03, slippageBps: 0.5, spreadBps: 0.5 };
 
 function Toggles({ options, value, onChange, max }) {
@@ -175,7 +177,8 @@ export default function Backtest() {
   const fx = market === 'forex';
   const stocks = market === 'stocks';
   const futures = market === 'futures';
-  const DEF = fx ? FX_DEFAULTS : stocks ? STOCK_DEFAULTS : futures ? FUTURES_DEFAULTS : CRYPTO_DEFAULTS;
+  const perps = market === 'perps';
+  const DEF = fx ? FX_DEFAULTS : stocks ? STOCK_DEFAULTS : futures ? FUTURES_DEFAULTS : perps ? PERP_DEFAULTS : CRYPTO_DEFAULTS;
   const [lib] = usePoll('/strategies');
   const [f, setF] = useState({
     strategy: 'adaptive', threshold: 30, riskPct: 1, maxPositionPct: 25,
@@ -192,7 +195,7 @@ export default function Backtest() {
     if (!f.symbols.length || !f.intervals.length) return toast('Pick at least one coin and one timeframe', 'err');
     setBusy(true);
     try {
-      setRes(await api.post('/backtest', { ...f, exchange: fx || stocks || futures ? exchange : 'binance', allowShort: Boolean(f.allowShort && exInfo?.canShort) }));
+      setRes(await api.post('/backtest', { ...f, exchange: fx || stocks || futures || perps ? exchange : 'binance', allowShort: Boolean(f.allowShort && exInfo?.canShort) }));
       reloadHistory();
     } catch (e) {
       toast(e.message, 'err');
@@ -213,7 +216,7 @@ export default function Backtest() {
           <Field label="Strategy">
             <select className="select" value={f.strategy} onChange={set('strategy')}>{strategies.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select>
           </Field>
-          <Field label="History (candles per market)" hint={fx || futures ? 'Current near-month contract from Kite (needs a Kite login)' : stocks ? 'From Kite historical data (needs a Kite login)' : 'Up to 5000 from Binance'}><input className="input mono" type="number" value={f.candles} onChange={set('candles')} /></Field>
+          <Field label="History (candles per market)" hint={fx || futures ? 'Current near-month contract from Kite (needs a Kite login)' : stocks ? 'From Kite historical data (needs a Kite login)' : perps ? 'Perpetual candles from Binance Futures' : 'Up to 5000 from Binance'}><input className="input mono" type="number" value={f.candles} onChange={set('candles')} /></Field>
           <div className="divider" />
           <div className="row small bold" style={{ gap: 6 }}><Layers size={14} /> Validation</div>
           <div className="grid g-2" style={{ gap: 10 }}>
@@ -231,6 +234,7 @@ export default function Backtest() {
             <Field label="Slippage (bps)"><input className="input mono" type="number" value={f.slippageBps} onChange={set('slippageBps')} /></Field>
             <Field label="Spread (bps)"><input className="input mono" type="number" value={f.spreadBps} onChange={set('spreadBps')} /></Field>
             <Field label="Latency (bars)" hint="1 = fill next open"><input className="input mono" type="number" value={f.latencyBars} onChange={set('latencyBars')} /></Field>
+            {perps && <Field label="Leverage (isolated)" hint="Liquidation is simulated"><input className="input mono" type="number" min="1" max="5" value={f.leverage ?? 2} onChange={set('leverage')} /></Field>}
             <Field label="Funding % per 8h" hint="0 for spot"><input className="input mono" type="number" step="0.001" value={f.fundingRatePct8h} onChange={set('fundingRatePct8h')} /></Field>
             <Field label="Threshold"><input className="input mono" type="number" value={f.threshold} onChange={set('threshold')} /></Field>
             <Field label="Start balance"><input className="input mono" type="number" value={f.startBalance} onChange={set('startBalance')} /></Field>

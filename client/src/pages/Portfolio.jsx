@@ -81,7 +81,7 @@ export default function Portfolio() {
             <tbody>
               {pf.assets.map((a) => (
                 <tr key={a.asset}>
-                  <td><div className="coin"><CoinIcon symbol={market === 'crypto' ? `${a.asset}USDT` : a.asset} size={22} />{a.asset}</div></td>
+                  <td><div className="coin"><CoinIcon symbol={market === 'crypto' ? `${a.asset}USDT` : a.asset} size={22} />{a.asset}{a.liqPrice ? <span className="tiny dim">&nbsp;{a.side} {a.leverage}x · liq {fmtUsd(a.liqPrice, a.liqPrice < 1 ? 5 : 2)}{a.fundingPaid ? ` · funding ${fmtUsd(-a.fundingPaid)}` : ''}</span> : null}</div></td>
                   <td className="num">{fmtQty(a.amount)}</td>
                   <td className="num">{fmtUsd(a.price, a.price < 1 ? 5 : 2)}</td>
                   <td className="num">{fmtUsd(a.value)}</td>

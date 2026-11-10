@@ -160,6 +160,7 @@ server.listen(config.port, async () => {
   console.log(`  Database:  ${dbKind}`);
   console.log(`  Claude AI: ${hasClaude() ? `enabled (${config.claudeModel})` : 'disabled - set ANTHROPIC_API_KEY'}`);
   console.log(`  Binance:   ${hasBinanceKeys() ? (config.binance.testnet ? 'owner keys set (TESTNET)' : 'owner keys set (LIVE - real money!)') : 'no owner keys (users connect their own)'}`);
+  if (config.binanceFutures.apiKey) console.log(`  Futures:   Binance USD-M owner keys set (${config.binanceFutures.testnet ? 'TESTNET' : 'LIVE - real money!'})`);
   console.log(`  Custom strategies loaded: ${customCount}\n`);
   startHealthMonitor();
   startLiquidationStream();

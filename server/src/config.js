@@ -27,6 +27,12 @@ export const config = {
   mongoUri: process.env.MONGO_URI || '',
   anthropicKey: process.env.ANTHROPIC_API_KEY || '',
   claudeModel: process.env.CLAUDE_MODEL || 'claude-opus-5-5',
+  // Owner's Binance USD-M futures keys (optional; users add theirs under Account -> Exchange connections).
+  binanceFutures: {
+    apiKey: process.env.BINANCE_FUTURES_API_KEY || '',
+    apiSecret: process.env.BINANCE_FUTURES_API_SECRET || '',
+    testnet: bool(process.env.BINANCE_FUTURES_TESTNET, true),
+  },
   binance: {
     apiKey: process.env.BINANCE_API_KEY || '',
     apiSecret: process.env.BINANCE_API_SECRET || '',
@@ -41,6 +47,7 @@ export const config = {
   paperFxStartBalance: Number(process.env.PAPER_FX_START_BALANCE || 1000000), // INR paper wallet for NSE forex
   paperStocksStartBalance: Number(process.env.PAPER_STOCKS_START_BALANCE || 1000000), // INR paper wallet for NSE stocks
   paperFuturesStartBalance: Number(process.env.PAPER_FUTURES_START_BALANCE || 2500000), // INR paper margin account for NSE futures
+  paperPerpsStartBalance: Number(process.env.PAPER_PERPS_START_BALANCE || 10000), // USDT paper margin account for Binance USD-M perpetuals
   paperOptionsStartBalance: Number(process.env.PAPER_OPTIONS_START_BALANCE || 500000), // INR paper wallet for NSE options
 };
 

@@ -25,6 +25,7 @@ function BotForm({ initial, onClose, onSaved }) {
   const fx = exInfo?.market === 'forex';
   const stocks = exInfo?.market === 'stocks';
   const futures = exInfo?.market === 'futures';
+  const perps = exInfo?.market === 'perps';
   const nseSymbol = (s, fallback) => (FX_PAIRS.includes(s) || isCryptoSymbol(s) ? fallback : s);
   // Switching the bot's exchange between crypto and NSE forex resets the pair and an unsupported timeframe.
   useEffect(() => {
@@ -85,6 +86,11 @@ function BotForm({ initial, onClose, onSaved }) {
             <Field label="Timeframe"><Seg value={f.interval} onChange={set('interval')} options={['1m', '5m', '15m', '1h', '4h'].filter((i) => !exInfo || exInfo.intervals.includes(i))} /></Field>
             <Field label="Mode"><Seg className="mode" value={f.mode} onChange={set('mode')} options={[{ value: 'paper', label: 'Paper' }, { value: 'live', label: 'Live' }]} /></Field>
           </div>
+          {perps && (
+            <Field label="Leverage (isolated margin)" hint={`Margin = notional / leverage. The Risk Engine refuses entries whose stop is more than half the distance to liquidation, and caps total leverage (Risk page). Max ${exInfo.maxLeverage}x.`}>
+              <Seg value={f.leverage || exInfo.defaultLeverage || 2} onChange={set('leverage')} options={Array.from({ length: exInfo.maxLeverage || 5 }, (_, k) => ({ value: k + 1, label: `${k + 1}x` }))} />
+            </Field>
+          )}
           {f.strategy === 'grid' && <div className="alert info small">AI Grid builds a ladder of up to 10 levels inside the detected range (each step at least 0.8% so fees are covered), only while the regime is Sideways or Low Volatility, and sells everything if price breaks below the range. Max position % caps the capital the grid uses.</div>}
           {f.strategy === 'dca' ? (
             <div className="grid g-2" style={{ gap: 12 }}>

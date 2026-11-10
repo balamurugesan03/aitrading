@@ -145,7 +145,7 @@ export async function analyze(symbol, interval = '1h', opts = {}) {
   // ---- Live intelligence: order book, futures, news, fear & greed ----
   // Crypto-only inputs (Binance futures positioning, crypto news, crypto fear & greed) are skipped for forex.
   const asset = baseAsset(symbol);
-  const crypto = (ex(exchange).market || 'crypto') === 'crypto';
+  const crypto = ['crypto', 'perps'].includes(ex(exchange).market || 'crypto'); // perps: same coins, same positioning data
   const [orderFlow, futures, news, fng] = live
     ? await Promise.all([settle(analyzeOrderFlow(symbol, exchange)), crypto ? settle(analyzeFutures(symbol)) : null, crypto ? settle(newsForAsset(asset)) : null, crypto ? settle(getFearGreed()) : null])
     : [null, null, null, null];

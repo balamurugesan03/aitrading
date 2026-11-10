@@ -1,7 +1,7 @@
 // Portfolio AI: valuation, exposure, correlation clusters, portfolio volatility and risk level.
 import { db } from '../db/index.js';
 import * as bn from '../exchange/binance.js';
-import { getPaperBalances, getPaperMargin } from '../bot/paperBroker.js';
+import { getPaperBalances, getPaperMargin, getPaperPerps, settlePaperPerps } from '../bot/paperBroker.js';
 import { EXCHANGES, tradingFor, credsFor, ex, isFx, isMargin, marginRateFor, accountOf, fetchCandles } from '../exchange/index.js';
 import { STABLES, pearson, returns, mapLimit } from './util.js';
 
@@ -42,7 +42,7 @@ export async function correlation(assetA, assetB) {
 // Live balances summed across every exchange the user has connected for trading.
 export async function liveBalances(user) {
   const total = {};
-  for (const e of Object.values(EXCHANGES).filter((x) => x.trading && !isFx(x.id))) { // forex is valued separately, in INR
+  for (const e of Object.values(EXCHANGES).filter((x) => x.trading && !isFx(x.id) && !isMargin(x.id))) { // INR and margin (futures) accounts are valued separately
     if (!(await credsFor(user, e.id))) continue;
     const { client } = await tradingFor(user, e.id);
     for (const b of await client.getAccount()) total[b.asset] = (total[b.asset] || 0) + b.free + b.locked;
@@ -50,11 +50,13 @@ export async function liveBalances(user) {
   return total;
 }
 
-// Forex (NSE currency futures) account, in INR. Paper: a fully funded wallet (cash + units x price).
+// INR accounts (NSE forex, stocks, futures) and margin accounts (NSE futures, Binance perps), in the account currency. Paper: a fully funded wallet (cash + units x price).
 // Live: Zerodha equity (opening balance + pay-in + today's mark-to-market); positions are listed at notional and
 // cash is what remains, so exposure above 100% means the account is leveraged beyond what the bot would do itself.
 async function valueFxPortfolio(user, mode, exchange) {
   const adapter = ex(exchange);
+  const Q = adapter.currency || 'USDT';
+  let perpMeta = {};
   let rows;
   let total;
   let liveMarginUsed = 0;
@@ -62,26 +64,31 @@ async function valueFxPortfolio(user, mode, exchange) {
     const { client } = await tradingFor(user, exchange);
     const a = await client.fxAccount();
     liveMarginUsed = a.marginUsed || 0;
-    const pos = a.positions.map((p) => ({ asset: p.pair, amount: p.units, side: p.units < 0 ? 'short' : 'long', price: p.lastPrice, value: Math.abs(p.units) * p.lastPrice, change: 0, stable: false, contract: p.contract, pnl: p.pnl }));
+    const pos = a.positions.map((p) => ({ asset: p.pair, amount: p.units, side: p.units < 0 ? 'short' : 'long', price: p.lastPrice, value: Math.abs(p.units) * p.lastPrice, change: 0, stable: false, contract: p.contract, pnl: p.pnl, ...(p.liqPrice && { liqPrice: p.liqPrice, leverage: p.leverage, entry: p.avgPrice }), ...(p.margin != null && { margin: p.margin }) }));
     const notional = pos.reduce((s, p) => s + p.value, 0);
-    rows = [{ asset: 'INR', amount: a.equity - notional, price: 1, value: a.equity - notional, change: 0, stable: true }, ...pos];
+    rows = [{ asset: Q, amount: a.equity - notional, price: 1, value: a.equity - notional, change: 0, stable: true }, ...pos];
     total = a.equity;
   } else {
+    if (adapter.perp) {
+      await settlePaperPerps(user._id, exchange).catch(() => null); // funding + liquidations first
+      perpMeta = await getPaperPerps(user._id, exchange);
+    }
     const balances = await getPaperBalances(user._id, exchange);
-    const held = Object.keys(balances).filter((k) => k !== 'INR' && balances[k] !== 0);
+    const held = Object.keys(balances).filter((k) => k !== Q && balances[k] !== 0);
     const tickers = held.length ? await adapter.getTickers(held).catch(() => []) : [];
     // Equity = cash + signed units x price (a short's sale proceeds sit in cash). Positions are shown at notional and
     // the cash row is what is left after reserving that notional, so exposure counts shorts too.
-    const held2 = Object.entries(balances).filter(([k, v]) => k !== 'INR' && v !== 0).map(([asset, amount]) => {
+    const held2 = Object.entries(balances).filter(([k, v]) => k !== Q && v !== 0).map(([asset, amount]) => {
       const t = tickers.find((x) => x.symbol === asset);
       const price = t?.price || 0;
-      return { asset, amount, side: amount < 0 ? 'short' : 'long', price, value: Math.abs(amount) * price, signed: amount * price, change: t?.change ?? 0, stable: false };
+      const pm = perpMeta[asset];
+      return { asset, amount, side: amount < 0 ? 'short' : 'long', price, value: Math.abs(amount) * price, signed: amount * price, change: t?.change ?? 0, stable: false, ...(pm && { entry: pm.entry, leverage: pm.leverage, liqPrice: pm.liqPrice, fundingPaid: pm.fundingPaid }) };
     });
-    total = (balances.INR || 0) + held2.reduce((s, x) => s + x.signed, 0);
+    total = (balances[Q] || 0) + held2.reduce((s, x) => s + x.signed, 0);
     const notional = held2.reduce((s, x) => s + x.value, 0);
-    rows = [{ asset: 'INR', amount: total - notional, price: 1, value: total - notional, change: 0, stable: true }, ...held2];
+    rows = [{ asset: Q, amount: total - notional, price: 1, value: total - notional, change: 0, stable: true }, ...held2];
   }
-  // Margin accounts (NSE futures): a position "uses" the margin it blocks, not its notional. Position rows carry
+  // Margin accounts (NSE futures, perps): a position "uses" the margin it blocks, not its notional. Position rows carry
   // value = blocked margin (with the notional alongside), and the cash row is the free margin, so the rows still
   // sum to equity and exposure means "share of equity blocked as margin". Leverage = notional / equity.
   let marginInfo = null;
@@ -90,23 +97,23 @@ async function valueFxPortfolio(user, mode, exchange) {
     const notional = pos.reduce((s, x) => s + x.value, 0);
     let blocked;
     if (mode === 'live') {
-      blocked = (x) => (notional ? liveMarginUsed * (x.value / notional) : 0); // Zerodha reports one total; split by notional
+      blocked = (x) => x.margin ?? (notional ? liveMarginUsed * (x.value / notional) : 0); // Zerodha reports one total: split by notional
     } else {
       const m = await getPaperMargin(user._id, exchange);
       blocked = (x) => m[x.asset] ?? x.value * marginRateFor(exchange, x.asset);
     }
-    pos.forEach((x) => { x.notional = x.value; x.value = blocked(x); });
+    pos.forEach((x) => { x.notional = x.value; x.value = blocked(x); delete x.margin; });
     const marginUsed = pos.reduce((s, x) => s + x.value, 0);
-    rows = [{ asset: 'INR', amount: total - marginUsed, price: 1, value: total - marginUsed, change: 0, stable: true }, ...pos];
+    rows = [{ asset: Q, amount: total - marginUsed, price: 1, value: total - marginUsed, change: 0, stable: true }, ...pos];
     marginInfo = { marginUsed, notional, freeMargin: total - marginUsed, leverage: total > 0 ? notional / total : 0 };
   }
   rows = rows.filter((x) => x.amount !== 0 || x.stable).sort((a, b) => b.value - a.value);
   rows.forEach((x) => (x.weightPct = total ? (x.value / total) * 100 : 0));
-  return { mode, exchange, currency: 'INR', total, assets: rows, stablePct: rows.filter((x) => x.stable).reduce((s, x) => s + x.weightPct, 0), ...(marginInfo && { margin: marginInfo }) };
+  return { mode, exchange, currency: Q, total, assets: rows, stablePct: rows.filter((x) => x.stable).reduce((s, x) => s + x.weightPct, 0), ...(marginInfo && { margin: marginInfo }) };
 }
 
 export async function valuePortfolio(user, mode = 'paper', exchange = 'binance') {
-  if (isFx(exchange)) return valueFxPortfolio(user, mode, exchange);
+  if (isFx(exchange) || isMargin(exchange)) return valueFxPortfolio(user, mode, exchange);
   const balances = mode === 'live' ? await liveBalances(user) : await getPaperBalances(user._id);
   const assets = Object.keys(balances).filter((a) => !STABLES.has(a));
   const tickers = assets.length ? await bn.getTickers(assets.map((a) => `${a}USDT`)).catch(() => []) : [];
@@ -124,9 +131,10 @@ export async function valuePortfolio(user, mode = 'paper', exchange = 'binance')
 export async function portfolioIntelligence(user, mode = 'paper', exchange = 'binance') {
   const fx = isFx(exchange);
   const pf = await valuePortfolio(user, mode, exchange);
-  const cashName = fx ? 'INR cash' : 'stablecoins';
+  const ownCandles = fx || isMargin(exchange); // positions keyed by the adapter's own symbols (pairs, contracts, perps)
+  const cashName = pf.margin ? 'free margin' : fx ? 'INR cash' : 'stablecoins';
   const risky = pf.assets.filter((a) => !a.stable && a.value > 1).slice(0, 10);
-  const series = await mapLimit(risky, 4, (a) => (fx ? fxReturns(exchange, a.asset) : hourlyReturns(a.asset)).catch(() => []));
+  const series = await mapLimit(risky, 4, (a) => (ownCandles ? fxReturns(exchange, a.asset) : hourlyReturns(a.asset)).catch(() => []));
   const matrix = risky.map((a, i) => risky.map((b, j) => +(i === j ? 1 : pearson(series[i], series[j])).toFixed(2)));
 
   // Portfolio volatility from the covariance of hourly returns (annualised).

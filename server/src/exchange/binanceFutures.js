@@ -19,6 +19,8 @@ async function get(pathname, params = {}) {
   return body;
 }
 
+export const fapiGet = get; // shared with the USD-M trading adapter (bperp.js)
+export const FAPI_BASE = FAPI;
 export const getPremiumIndex = (symbol) => get('/fapi/v1/premiumIndex', { symbol });
 export const getFundingHistory = (symbol, limit = 30) => get('/fapi/v1/fundingRate', { symbol, limit });
 export const getFuturesTicker = (symbol) => get('/fapi/v1/ticker/24hr', { symbol });
