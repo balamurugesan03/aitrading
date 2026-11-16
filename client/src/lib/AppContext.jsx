@@ -39,6 +39,15 @@ export function AppProvider({ children }) {
 
   const refreshMe = useCallback(() => api.get('/auth/me').then(setMe).catch(() => {}), []);
   const refreshStatus = useCallback(() => api.get('/status').then(setStatus).catch((e) => e.status !== 401 && setStatus({ offline: true })), []);
+  // What live trading needs: exchange connections, the plan's live-trading feature and the daily Zerodha (Kite) login.
+  const [access, setAccess] = useState(null);
+  const refreshAccess = useCallback(async () => {
+    try {
+      const [connections, sub] = await Promise.all([api.get('/account/connections'), api.get('/account/subscription').catch(() => null)]);
+      const kite = connections.some((c) => c.exchange === 'zerodha' && c.active) ? await api.get('/brokers/zerodha/status').catch(() => null) : null;
+      setAccess({ connections, plan: sub?.plan || null, kiteLoggedIn: Boolean(kite?.loggedIn) });
+    } catch { /* keep the last known state */ }
+  }, []);
 
   useEffect(() => {
     fetch('/api/branding').then((r) => r.json()).then((b) => { setBranding(b); applyBranding(b); }).catch(() => applyBranding(DEFAULT_BRANDING));
@@ -48,12 +57,13 @@ export function AppProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (!authed) { setMe(null); setStatus(null); return undefined; }
+    if (!authed) { setMe(null); setStatus(null); setAccess(null); return undefined; }
     refreshMe();
     refreshStatus();
-    const id = setInterval(() => { refreshStatus(); refreshMe(); }, 30000);
+    refreshAccess();
+    const id = setInterval(() => { refreshStatus(); refreshMe(); refreshAccess(); }, 30000);
     return () => clearInterval(id);
-  }, [authed, refreshMe, refreshStatus]);
+  }, [authed, refreshMe, refreshStatus, refreshAccess]);
 
   useServerEvents((type, p) => {
     if (type === 'settings' || type === 'killswitch' || type === 'platform') refreshStatus();
@@ -91,7 +101,7 @@ export function AppProvider({ children }) {
   return (
     <Ctx.Provider value={{
       authed, me, user, refreshMe, login, logout, branding, setBranding,
-      status, refreshStatus, mode, setMode, exchange, setExchange, exInfo, market, currency, money, symbol, setSymbol, interval, setInterval: setInterval_, toast,
+      status, refreshStatus, access, refreshAccess, mode, setMode, exchange, setExchange, exInfo, market, currency, money, symbol, setSymbol, interval, setInterval: setInterval_, toast,
     }}>
       {children}
       <div className="toast-wrap">

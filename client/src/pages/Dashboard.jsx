@@ -4,6 +4,8 @@ import { Wallet, TrendingUp, Bot, Trophy, Gauge, Flame, Activity, Zap } from 'lu
 import { usePoll, useServerEvents } from '../lib/hooks.js';
 import { useApp } from '../lib/AppContext.jsx';
 import { CoinIcon, ActionBadge, FearGreed, Empty } from '../components/ui.jsx';
+import TradingStatus from '../components/TradingStatus.jsx';
+import { SetupChecklist, BotQuickControl } from '../components/ControlCenter.jsx';
 import { fmtUsd, fmtMoney, fmtPct, fmtPrice, fmtCompact, fmtQty, ago, tone, baseOf, quoteOf } from '../lib/format.js';
 
 export default function Dashboard() {
@@ -13,7 +15,7 @@ export default function Dashboard() {
   const [bots, , reloadBots] = usePoll('/bots', 15000);
   const [top] = usePoll(`/market/top?limit=12&exchange=${exchange}`, 20000, [exchange]);
   const [fng] = usePoll(market === 'crypto' ? '/market/sentiment' : null, 600000, [market]);
-  const [trades, , reloadTrades] = usePoll(`/trades?mode=${mode}&limit=8`, 0, [mode]);
+  const [trades, , reloadTrades] = usePoll(`/trades?mode=${mode}&limit=300`, 60000, [mode]);
   const [feed, setFeed] = useState([]);
 
   useServerEvents((type, p) => {
@@ -56,6 +58,12 @@ export default function Dashboard() {
           <span className="stat-sub muted">{running.map((b) => baseOf(b.symbol)).join(' · ') || 'No bots running'}</span>
         </div>
       </div>
+
+      <SetupChecklist bots={bots} trades={trades} />
+
+      <TradingStatus bots={bots} trades={trades} />
+
+      <BotQuickControl bots={bots} reload={reloadBots} />
 
       <div className="grid g-wide">
         <div className="card">
@@ -117,7 +125,7 @@ export default function Dashboard() {
               <table>
                 <thead><tr><th>Pair</th><th>Side</th><th className="num">Price</th><th className="num">Value</th><th className="num">PnL</th><th>When</th></tr></thead>
                 <tbody>
-                  {trades.map((t) => (
+                  {trades.slice(0, 8).map((t) => (
                     <tr key={t._id}>
                       <td><div className="coin"><CoinIcon symbol={t.symbol} size={22} />{baseOf(t.symbol)}</div></td>
                       <td><ActionBadge action={t.side === 'BUY' ? 'BUY' : 'SELL'} /></td>

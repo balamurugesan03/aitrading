@@ -235,7 +235,7 @@ export default function Bots() {
   const fmtUsd = money; // account strip follows the top-bar exchange (INR for forex)
   const [bots, , reload] = usePoll('/bots', 10000);
   const [risk, , reloadRisk] = usePoll(`/risk/overview?mode=${mode}&exchange=${exchange}`, 20000, [mode, exchange]);
-  const [form, setForm] = useState(null);
+  const [form, setForm] = useState(() => (new URLSearchParams(window.location.search).get('new') ? {} : null)); // /bots?new=1 opens the form
   const [selected, setSelected] = useState(null);
   const [logs, , reloadLogs] = usePoll(`/logs?limit=150${selected ? `&botId=${selected}` : ''}`, 0, [selected]);
   const [prices, setPrices] = useState({});

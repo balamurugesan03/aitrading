@@ -57,6 +57,11 @@ r.get('/status', wrap(async (req, res) => {
     strategies: Object.fromEntries(listStrategies(uid(req)).map((x) => [x.id, x.name])), intervals: INTERVALS,
     tradingEnabled: s.tradingEnabled, killSwitchAt: s.killSwitchAt, killSwitchReason: s.killSwitchReason, platformHalt: s.platformHalt,
     health, modelVersion: activeParams.version, binance: { keys: Boolean(config.binance.apiKey), testnet: config.binance.testnet },
+    // The owner's .env keys count as a live connection (see credsFor) - the client shows them in the trading-status panel.
+    envKeys: req.user.role === 'admin' ? {
+      ...(config.binance.apiKey && config.binance.apiSecret && { binance: { testnet: config.binance.testnet } }),
+      ...(config.binanceFutures.apiKey && config.binanceFutures.apiSecret && { bperp: { testnet: config.binanceFutures.testnet } }),
+    } : {},
   });
 }));
 
