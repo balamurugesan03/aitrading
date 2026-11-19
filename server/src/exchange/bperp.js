@@ -280,7 +280,7 @@ function tradingClient(creds) {
 
 export const bperp = {
   id: 'bperp', name: 'Binance (USD-M futures)', trading: true, canShort: true, currency: 'USDT', market: 'perps', account: 'perps',
-  intervals: ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w'],
+  intervals: ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w', '1M'],
   margin: true, perp: true,
   maxLeverage: MAX_LEVERAGE, defaultLeverage: DEFAULT_LEVERAGE,
   marginRateOf: (_symbol, leverage) => 1 / clampLeverage(leverage),

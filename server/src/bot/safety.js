@@ -104,7 +104,7 @@ export function abnormalPrice(price, lastClose, atr, maxMovePct) {
   return movePct > limit ? `Price moved ${movePct.toFixed(2)}% from the last close (limit ${limit.toFixed(1)}%)` : null;
 }
 
-const INTERVAL_SEC = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '2h': 7200, '4h': 14400, '6h': 21600, '12h': 43200, '1d': 86400, '1w': 604800 };
+const INTERVAL_SEC = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '2h': 7200, '4h': 14400, '6h': 21600, '12h': 43200, '1d': 86400, '1w': 604800, '1M': 2592000 };
 export function staleData(lastCandleTime, interval) {
   const sec = INTERVAL_SEC[interval] || 3600;
   const age = Date.now() / 1000 - lastCandleTime;

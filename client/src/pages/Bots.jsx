@@ -9,8 +9,8 @@ import { fmtPrice, fmtMoney, fmtPct, fmtQty, ago, tone, baseOf, quoteOf, FX_PAIR
 
 const DEFAULTS = {
   // EMA Trend on 4h was the only strategy profitable on train, validation and out-of-sample data (2020-2026).
-  name: '', symbol: 'BTCUSDT', interval: '4h', strategy: 'ema_trend', mode: 'paper', useClaude: false,
-  threshold: 30, riskPct: 1, maxPositionPct: 25, trailingStop: true, trailAtr: 2.5, dailyLossLimitPct: 5,
+  name: '', autoStart: true, symbol: 'BTCUSDT', interval: '4h', strategy: 'ema_trend', mode: 'paper', useClaude: false,
+  threshold: 30, riskPct: 1, maxPositionPct: 25, maxHoldMin: 0, trailingStop: true, trailAtr: 2.5, dailyLossLimitPct: 5,
   dcaEvery: 24, dcaTranchePct: 5, dcaMaxTranches: 6, dcaTakeProfitPct: 4,
 };
 
@@ -26,6 +26,9 @@ function BotForm({ initial, onClose, onSaved }) {
   const stocks = exInfo?.market === 'stocks';
   const futures = exInfo?.market === 'futures';
   const perps = exInfo?.market === 'perps';
+  const crypto = exInfo && !fx && !stocks && !futures && exInfo.market !== 'options';
+  // Every USDT coin the selected exchange lists (spot, or USD-M perpetuals for Binance futures).
+  const [coinList] = usePoll(crypto ? `/market/symbols?quote=USDT&exchange=${f.exchange}` : null, 0, [f.exchange, crypto]);
   const nseSymbol = (s, fallback) => (FX_PAIRS.includes(s) || isCryptoSymbol(s) ? fallback : s);
   // Switching the bot's exchange between crypto and NSE forex resets the pair and an unsupported timeframe.
   useEffect(() => {
@@ -44,8 +47,10 @@ function BotForm({ initial, onClose, onSaved }) {
   const save = async () => {
     setBusy(true);
     try {
-      const sym = f.symbol.toUpperCase();
-      const body = { ...f, symbol: fx || stocks || futures || sym.endsWith('USDT') ? sym : `${sym}USDT` };
+      const sym = f.symbol.trim().toUpperCase();
+      const full = fx || stocks || futures || sym.endsWith('USDT') ? sym : `${sym}USDT`;
+      if (crypto && coinList?.length && !coinList.includes(full)) throw new Error(`${full} is not listed on ${exInfo.name}`);
+      const body = { ...f, symbol: full };
       const saved = initial?._id ? await api.patch(`/bots/${initial._id}`, body) : await api.post('/bots', body);
       toast(initial?._id ? 'Bot updated' : `Bot "${saved.name}" created`);
       onSaved();
@@ -70,14 +75,15 @@ function BotForm({ initial, onClose, onSaved }) {
               ? <select className="select" value={f.symbol} onChange={set('symbol')}>{['USDINR', 'EURINR', 'GBPINR', 'JPYINR'].map((p) => <option key={p} value={p}>{p}</option>)}</select>
               : futures
                 ? <><input className="input mono" list="nfut-symbols" value={f.symbol} onChange={set('symbol')} placeholder="NIFTY" /><datalist id="nfut-symbols">{INDEX_FUTURES.map((s) => <option key={s} value={s} />)}</datalist></>
-                : <input className="input mono" value={f.symbol} onChange={set('symbol')} placeholder={stocks ? 'RELIANCE' : 'BTCUSDT'} />}</Field>
+                : <><input className="input mono" list={crypto ? 'bot-coins' : undefined} value={f.symbol} onChange={set('symbol')} placeholder={stocks ? 'RELIANCE' : coinList ? `Search ${coinList.length} coins` : 'BTCUSDT'} />
+                  {crypto && <datalist id="bot-coins">{(coinList || []).map((c) => <option key={c} value={c} />)}</datalist>}</>}</Field>
           </div>
           <Field label="AI strategy" hint={strat ? `${strat.description}${strat.timeframes?.length ? ` Best on ${strat.timeframes.join(', ')}.` : ''}` : ''}>
             <select className="select" value={f.strategy} onChange={set('strategy')}>
               {(lib?.strategies || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </Field>
-          <Field label="Exchange" hint={exInfo && !exInfo.trading ? `${exInfo.name}: paper trading only (live trading not supported yet)` : 'Live trading uses the API keys you connected for this exchange'}>
+          <Field label={`Exchange · ${perps || futures ? 'FUTURES' : fx ? 'FOREX' : stocks ? 'STOCKS' : 'SPOT'}`} hint={exInfo && !exInfo.trading ? `${exInfo.name}: paper trading only (live trading not supported yet)` : 'Live trading uses the API keys you connected for this exchange'}>
             <select className="select" value={f.exchange} onChange={set('exchange')}>
               {(status?.exchanges || []).map((e) => <option key={e.id} value={e.id}>{e.name}{e.trading ? '' : ' (paper only)'}</option>)}
             </select>
@@ -126,8 +132,18 @@ function BotForm({ initial, onClose, onSaved }) {
                 <Field label="Daily loss limit %" hint="Stops new entries"><input className="input mono" type="number" value={f.dailyLossLimitPct} onChange={set('dailyLossLimitPct')} /></Field>
                 <Field label="Trailing ATR ×" hint="Trailing stop distance"><input className="input mono" type="number" step="0.1" value={f.trailAtr} onChange={set('trailAtr')} /></Field>
                 <Field label="Trailing stop"><div style={{ paddingTop: 6 }}><Switch checked={f.trailingStop} onChange={set('trailingStop')} /></div></Field>
+                <Field label="Max hold time (min)" hint="Auto sell after N minutes · 0 = off"><input className="input mono" type="number" min="0" step="1" value={f.maxHoldMin ?? 0} onChange={set('maxHoldMin')} /></Field>
               </div>
             </>
+          )}
+          {!initial?._id && (
+            <div className="row between card" style={{ padding: 12 }}>
+              <div>
+                <div className="row bold small" style={{ gap: 6 }}><Play size={14} /> Start automatically</div>
+                <div className="tiny muted">The bot starts as soon as it is created, then buys and sells on its own (paper or live): it enters when a signal passes the Risk Engine and exits on stop-loss, take-profit or an AI exit signal.</div>
+              </div>
+              <Switch checked={f.autoStart !== false} onChange={set('autoStart')} />
+            </div>
           )}
           {f.mode === 'live' && <div className="alert warn">Live bots place real market orders on Binance{status?.binance?.testnet ? ' Testnet' : ''}. Backtest (out-of-sample) and paper-trade the strategy first.</div>}
           <button className="btn primary block" onClick={save} disabled={busy}>{busy ? <Spinner /> : <Bot size={15} />} {initial?._id ? 'Save changes' : 'Create bot'}</button>
@@ -208,11 +224,12 @@ function BotCard({ bot, price, onChange, onSelect, selected }) {
             <span>Avg entry</span><span>{fmtPrice(pos.entry)}</span>
             {pos.stopLoss > 0 && <><span>Stop-loss {bot.trailingStop && '(trailing)'}</span><span className="down">{fmtPrice(pos.stopLoss)}</span></>}
             <span>Take-profit</span><span className="up">{fmtPrice(pos.takeProfit)}</span>
+            {bot.maxHoldMin > 0 && pos.openedAt && <><span>Auto exit (max hold {bot.maxHoldMin} min)</span><span>{Math.max(0, Math.ceil((pos.openedAt + bot.maxHoldMin * 60000 - Date.now()) / 60000))} min left</span></>}
             {pos.riskPct && <><span>Risk engine size</span><span>{pos.riskPct}% risk</span></>}
           </div>
         </div>
       ) : (
-        <div className="position-box muted small">{bot.grid ? `Grid active: ${bot.grid.levels.length} levels ${fmtPrice(bot.grid.lower)} – ${fmtPrice(bot.grid.upper)}, waiting for price to reach a level.` : running ? (bot.strategy === 'grid' ? 'Waiting for a sideways / low-volatility regime to build the grid.' : `Flat — waiting for an approved LONG signal (threshold ${bot.threshold}).`) : paused ? 'Paused by the safety system.' : 'Bot is stopped.'}</div>
+        <div className="position-box muted small">{bot.grid ? `Grid active: ${bot.grid.levels.length} levels ${fmtPrice(bot.grid.lower)} – ${fmtPrice(bot.grid.upper)}, waiting for price to reach a level.` : running ? (bot.strategy === 'grid' ? 'Waiting for a sideways / low-volatility regime to build the grid.' : <>AUTO mode: the bot will buy / sell by itself when a signal is approved (threshold {bot.threshold}). Checks once per {bot.interval} candle.{ls ? <div style={{ marginTop: 4 }}>Last check: <b>{ls.signal || 'WAIT'}</b>{ls.rejectedBy?.length ? <> · not traded because: <span className="down">{ls.rejectedBy.join(', ')}</span></> : ls.signal === 'WAIT' ? ' · no setup yet' : ''}</div> : <div style={{ marginTop: 4 }}>Waiting for the first {bot.interval} candle to close…</div>}</>) : paused ? 'Paused by the safety system.' : 'Bot is stopped.'}</div>
       )}
       {ls?.claude && <div className="ai-reason small"><b className="row" style={{ gap: 6, marginBottom: 4 }}><Sparkles size={13} color="#b3a1ff" /> Claude</b>{ls.claude}</div>}
 
@@ -226,6 +243,41 @@ function BotCard({ bot, price, onChange, onSelect, selected }) {
         <button className="btn sm ghost" disabled={running} onClick={() => onChange('edit')}><Settings2 size={13} /></button>
         <button className="btn sm ghost danger" disabled={busy || running || !!pos} onClick={() => confirm(`Delete ${bot.name}?`) && act('', 'del')}><Trash2 size={13} /></button>
       </div>
+    </div>
+  );
+}
+
+// Realized (closed trades) + unrealized (open position at the live price) P&L, split by paper / live.
+function PnlSummary({ bots, priceOf }) {
+  const rows = ['paper', 'live'].map((m) => {
+    const list = bots.filter((b) => (b.mode || 'paper') === m);
+    const byCcy = {};
+    for (const b of list) {
+      const ccy = quoteOf(b.symbol);
+      const t = (byCcy[ccy] ||= { realized: 0, open: 0, trades: 0, wins: 0, openCount: 0 });
+      t.realized += b.stats?.pnl || 0;
+      t.trades += b.stats?.trades || 0;
+      t.wins += b.stats?.wins || 0;
+      const pos = b.position;
+      const px = priceOf(b.symbol);
+      if (pos?.qty > 0 && px) {
+        t.open += pos.side === 'short' ? pos.cost - px * pos.qty : px * pos.qty - pos.cost;
+        t.openCount++;
+      }
+    }
+    return { m, count: list.length, byCcy };
+  }).filter((r) => r.count);
+  if (!rows.length) return null;
+  return (
+    <div className="pnl-summary">
+      {rows.map(({ m, byCcy }) => Object.entries(byCcy).map(([ccy, t]) => (
+        <div key={m + ccy} className="pnl-row">
+          <span className={`badge ${m === 'live' ? 'short' : ''}`}>{m.toUpperCase()}</span>
+          <span>Realized <b className={tone(t.realized)}>{fmtMoney(t.realized, ccy)}</b> <span className="dim">({t.trades} trades, {t.wins} wins)</span></span>
+          <span>Open <b className={tone(t.open)}>{fmtMoney(t.open, ccy)}</b> <span className="dim">({t.openCount} open)</span></span>
+          <span>Total <b className={tone(t.realized + t.open)}>{fmtMoney(t.realized + t.open, ccy)}</b></span>
+        </div>
+      )))}
     </div>
   );
 }
@@ -299,13 +351,14 @@ export default function Bots() {
             <span className="card-title"><ScrollText size={14} /> {selected ? `${bots?.find((b) => b._id === selected)?.name || ''} Logs` : 'All Bot Logs'}</span>
             {selected && <button className="btn sm ghost" onClick={() => setSelected(null)}>Show all</button>}
           </div>
+          {bots && <PnlSummary bots={selected ? bots.filter((b) => b._id === selected) : bots} priceOf={priceOf} />}
           {logs?.length ? (
             <div className="log-feed" style={{ maxHeight: 640 }}>
               {logs.map((l) => (
                 <div key={l._id} className="log-line">
                   <span className="dim">{new Date(l.time).toLocaleTimeString()}</span>
                   <span className={`lvl ${l.level}`}>{l.level}</span>
-                  <span>{l.msg}</span>
+                  <span className={l.level === 'pnl' ? tone(l.data?.unrealized) : l.level === 'profit' ? 'up' : l.level === 'loss' ? 'down' : undefined}>{l.msg}</span>
                 </div>
               ))}
             </div>

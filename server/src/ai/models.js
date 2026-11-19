@@ -6,8 +6,8 @@ import { regimeSeries } from './regime.js';
 import { detectPatterns } from './patterns.js';
 import { buildFeatures } from './mlModel.js';
 
-export const HIGHER_TF = { '1m': '15m', '3m': '15m', '5m': '1h', '15m': '4h', '30m': '4h', '1h': '4h', '2h': '1d', '4h': '1d', '6h': '1d', '12h': '1w', '1d': '1w' };
-export const TF_SEC = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '2h': 7200, '4h': 14400, '6h': 21600, '12h': 43200, '1d': 86400, '1w': 604800 };
+export const HIGHER_TF = { '1m': '15m', '3m': '15m', '5m': '1h', '15m': '4h', '30m': '4h', '1h': '4h', '2h': '1d', '4h': '1d', '6h': '1d', '12h': '1w', '1d': '1w', '1w': '1M' };
+export const TF_SEC = { '1m': 60, '3m': 180, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '2h': 7200, '4h': 14400, '6h': 21600, '12h': 43200, '1d': 86400, '1w': 604800, '1M': 2592000 };
 
 // Builds higher-timeframe candles from base candles. htfIndex[i] = the newest HTF candle that was fully
 // closed when base candle i closed, so no bar ever sees an unfinished higher-timeframe candle.

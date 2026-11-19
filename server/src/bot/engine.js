@@ -39,6 +39,7 @@ export const BOT_DEFAULTS = {
   trailAtr: 2.5,
   dailyLossLimitPct: 5,
   leverage: 2, // perpetuals only (1-5x, isolated)
+  maxHoldMin: 0, // 0 = off; otherwise the bot sells (or covers) a trade automatically after this many minutes
 };
 
 const userCache = new Map();
@@ -53,6 +54,23 @@ async function getUser(id) {
 async function log(bot, level, msg, data) {
   const row = await db.logs.insert({ userId: bot?.userId || null, botId: bot?._id || null, level, msg, data, time: Date.now() });
   events.emit('log', row);
+}
+
+// ---- P&L text for the bot log (paper and live) ----
+const signed = (n) => `${n >= 0 ? '+' : ''}${(+n || 0).toFixed(2)}`;
+const modeTag = (bot) => (bot?.mode === 'live' ? '[LIVE]' : '[PAPER]');
+async function quoteOf(bot) {
+  return (await symbolInfo(bot.exchange, bot.symbol).catch(() => null))?.quote || bot.symbol.slice(baseAsset(bot.symbol).length) || 'USDT';
+}
+// Unrealized P&L of an open position at the given price. Long: value - cost. Short: proceeds - cost to buy back.
+function openPnl(pos, price) {
+  const pnl = pos.side === 'short' ? pos.cost - price * pos.qty : price * pos.qty - pos.cost;
+  return { pnl, pct: pos.cost ? (pnl / pos.cost) * 100 : 0 };
+}
+// "Total P&L +12.34 USDT (3 trades, 2 wins)" from the bot's realized stats.
+function totalsText(stats, ccy) {
+  const s = stats || { trades: 0, wins: 0, pnl: 0 };
+  return `Total realized P&L ${signed(s.pnl)} ${ccy} (${s.trades} trade${s.trades === 1 ? '' : 's'}, ${s.wins} win${s.wins === 1 ? '' : 's'})`;
 }
 
 async function warnOnce(bot, key, msg) {
@@ -132,7 +150,7 @@ async function openPosition(bot, user, signal, sizing, candles, candleTime) {
   await db.bots.update(bot._id, { position });
   const qtyLabel = await qtyText(bot.exchange, bot.symbol, fill.qty);
   const marginNote = (fill.sim?.marginBlocked ? ` | margin ${fill.sim.marginBlocked.toFixed(0)}` : '') + (fill.leverage ? ` | ${fill.leverage}x, liquidation ${(+fill.liqPrice).toFixed(4)}` : '');
-  await log(bot, 'trade', `${short ? 'SELL SHORT' : 'BUY'} ${qtyLabel} ${info.base} @ ${fill.price.toFixed(4)} | risk ${sizing.riskPct}%${marginNote} | SL ${position.stopLoss.toFixed(4)} TP ${position.takeProfit.toFixed(4)}`);
+  await log(bot, 'trade', `${modeTag(bot)} ${short ? 'SELL SHORT' : 'BUY'} ${qtyLabel} ${info.base} @ ${fill.price.toFixed(4)} | risk ${sizing.riskPct}%${marginNote} | SL ${position.stopLoss.toFixed(4)} TP ${position.takeProfit.toFixed(4)}`);
   notify(user._id, { type: 'trade', title: `${bot.name}: ${short ? 'sold short' : 'bought'} ${info.base}`, body: `${qtyLabel} @ ${fill.price.toFixed(4)} (${bot.mode})`, important: bot.mode === 'live' });
   if (bot.copyable && !short) events.emit('copy:open', { bot, user, notional: fill.cost, equity: sizing.equity });
   // Put the stop on the exchange straight away instead of waiting for the next tick.
@@ -295,7 +313,8 @@ async function closePosition(bot, user, price, reason, signal, exitCtx = {}) {
   // A live exit sells everything the exchange holds, so whatever is left over does not exist (fee dust, sold elsewhere).
   const leftover = bot.mode !== 'live' && remaining > pos.qty * 0.001 ? { ...pos, qty: remaining, cost: pos.cost * (1 - soldShare) } : null;
   await db.bots.update(bot._id, { position: leftover, stats, grid: leftover ? bot.grid : bot.grid ? null : undefined });
-  await log(bot, pnl >= 0 ? 'profit' : 'loss', `${short ? 'BUY TO COVER' : 'SELL'} @ ${exitPrice.toFixed(4)} (${reason}) PnL ${pnl.toFixed(2)} (${pnlPct.toFixed(2)}%)${leftover ? ' - partial, remainder still open' : ''}`);
+  const ccyLog = await quoteOf(bot);
+  await log(bot, pnl >= 0 ? 'profit' : 'loss', `${modeTag(bot)} ${short ? 'BUY TO COVER' : 'SELL'} @ ${exitPrice.toFixed(4)} (${reason}) | ${pnl >= 0 ? 'PROFIT' : 'LOSS'} ${signed(pnl)} ${ccyLog} (${signed(pnlPct)}%)${leftover ? ' - partial, remainder still open' : ''} | ${totalsText(stats, ccyLog)}`, { pnl, pnlPct, mode: bot.mode, totalPnl: stats.pnl, trades: stats.trades, wins: stats.wins });
   if (bot.mode === 'live' && remaining > pos.qty * 0.01) await log(bot, 'warn', `The exchange held ${remaining.toFixed(8)} less than the bot expected - only what was there was sold`);
   const ccy = (await symbolInfo(bot.exchange, bot.symbol).catch(() => null))?.quote || 'USDT';
   notify(user._id, { type: pnl >= 0 ? 'profit' : 'loss', title: `${bot.name}: ${pnl >= 0 ? 'profit' : 'loss'} ${pnl.toFixed(2)} ${ccy}`, body: `${reason} · ${pnlPct.toFixed(2)}%`, important: bot.mode === 'live' });
@@ -318,7 +337,7 @@ async function perpLiquidated(bot, user) {
   stats.trades++;
   stats.pnl += pnl;
   await db.bots.update(bot._id, { position: null, stats });
-  await log(bot, 'loss', `LIQUIDATED: ${bot.symbol} ${pos.side || 'long'} at ${(liq?.price ?? pos.liqPrice ?? 0).toFixed(4)} (${pos.leverage || '?'}x) - isolated margin lost, PnL ${pnl.toFixed(2)}`);
+  await log(bot, 'loss', `${modeTag(bot)} LIQUIDATED: ${bot.symbol} ${pos.side || 'long'} at ${(liq?.price ?? pos.liqPrice ?? 0).toFixed(4)} (${pos.leverage || '?'}x) - isolated margin lost, LOSS ${signed(pnl)} | ${totalsText(stats, await quoteOf(bot))}`, { pnl, mode: bot.mode, totalPnl: stats.pnl, trades: stats.trades, wins: stats.wins });
   notify(user._id, { type: 'loss', title: `${bot.name}: position liquidated`, body: `${bot.symbol} ${pos.side || 'long'} at ${pos.leverage || '?'}x - PnL ${pnl.toFixed(2)} USDT`, important: true });
   return true;
 }
@@ -343,7 +362,7 @@ async function dcaTick(bot, user, signal, price, candleTime) {
   const avg = cost / qty;
   const position = { qty, cost, entry: avg, stopLoss: 0, initialStop: avg * 0.9, takeProfit: avg * (1 + tpPct / 100), highest: Math.max(pos?.highest || 0, price), lowest: Math.min(pos?.lowest || price, price), openedAt: pos?.openedAt || Date.now(), tranches: tranches + 1, entryContext: pos?.entryContext || entryContext(signal, []) };
   await db.bots.update(bot._id, { position, lastDcaCandle: candleTime });
-  await log(bot, 'trade', `DCA tranche ${tranches + 1}: bought ${fill.qty.toFixed(6)} @ ${fill.price.toFixed(4)} | avg cost ${avg.toFixed(4)}`);
+  await log(bot, 'trade', `${modeTag(bot)} DCA tranche ${tranches + 1}: bought ${fill.qty.toFixed(6)} @ ${fill.price.toFixed(4)} | avg cost ${avg.toFixed(4)}`);
 }
 
 // ---- AI Grid (runs every tick on price) ----
@@ -394,7 +413,7 @@ async function gridTick(bot, user, price, closed, ind, regime, htfRegime) {
     await db.trades.update(t._id, { pnl, pnlPct: (pnl / lot.cost) * 100 });
     grid.lots = grid.lots.filter((l) => l !== lot);
     bot.stats = { trades: (bot.stats?.trades || 0) + 1, wins: (bot.stats?.wins || 0) + (pnl > 0 ? 1 : 0), pnl: (bot.stats?.pnl || 0) + pnl };
-    await log(bot, pnl >= 0 ? 'profit' : 'loss', `Grid sell @ ${fill.price.toFixed(4)} PnL ${pnl.toFixed(2)}`);
+    await log(bot, pnl >= 0 ? 'profit' : 'loss', `${modeTag(bot)} Grid sell @ ${fill.price.toFixed(4)} | ${pnl >= 0 ? 'PROFIT' : 'LOSS'} ${signed(pnl)} ${await quoteOf(bot)} | ${totalsText(bot.stats, await quoteOf(bot))}`, { pnl, mode: bot.mode, totalPnl: bot.stats.pnl, trades: bot.stats.trades, wins: bot.stats.wins });
     changed = true;
   }
   if (settings.tradingEnabled && GRID_REGIMES.includes(regime)) {
@@ -495,6 +514,9 @@ async function tick(botId) {
       // Futures: exit a day before the contract expires; the next entry uses the new front month.
       if (bot.position.contractExpiry && Date.now() > bot.position.contractExpiry - 86400e3) return await closePosition(bot, user, price, 'Futures contract expiry (rolled out)', null, exitCtx);
       if (isShort ? price <= bot.position.takeProfit : price >= bot.position.takeProfit) return await closePosition(bot, user, price, 'Take-profit hit', null, exitCtx);
+      // Max hold time: exit automatically once the trade has been open this long (checked every 15 s).
+      const holdMin = Number(bot.maxHoldMin) || 0;
+      if (holdMin > 0 && bot.position.openedAt && Date.now() - bot.position.openedAt >= holdMin * 60000) return await closePosition(bot, user, price, `Max hold time ${holdMin} min reached`, null, exitCtx);
       if (bot.mode === 'live') {
         await syncExchangeStop(bot, user, price);
         bot = await db.bots.findOne({ _id: botId });
@@ -529,12 +551,18 @@ async function tick(botId) {
     });
     await db.bots.update(bot._id, {
       lastCandleTime: lastClosed.time,
-      lastSignal: { signal: signal.signal, action: signal.action, score: signal.score, probability: signal.probability, quality: signal.quality, regime: signal.regime?.label, strategy: signal.strategyName, decision: risk?.decision, time: signal.time, claude: signal.claude?.decision?.reasoning },
+      lastSignal: { signal: signal.signal, action: signal.action, score: signal.score, probability: signal.probability, quality: signal.quality, regime: signal.regime?.label, strategy: signal.strategyName, decision: risk?.decision, rejectedBy: risk?.rejectedBy || [], time: signal.time, claude: signal.claude?.decision?.reasoning },
     });
     events.emit('signal', saved);
     errorCount.set(botId, 0);
     await log(bot, 'info', `${signal.signal} | ${signal.regime?.label} -> ${signal.strategyName} | score ${signal.score} | p=${(signal.probability * 100).toFixed(0)}% | E[r] ${signal.expectedReturnPct}% | R:R ${signal.rr} | ${signal.quality}${risk ? ` | ${risk.decision}${risk.rejectedBy.length ? ` (${risk.rejectedBy.join(', ')})` : ''}` : ''}`);
 
+    // While a trade is open, write its running profit / loss to the log once per candle.
+    if (bot.position?.qty > 0) {
+      const { pnl, pct } = openPnl(bot.position, price);
+      const ccy = await quoteOf(bot);
+      await log(bot, 'pnl', `${modeTag(bot)} OPEN ${(bot.position.side || 'long').toUpperCase()} ${bot.symbol}: entry ${bot.position.entry.toFixed(4)} -> now ${price.toFixed(4)} | unrealized ${pnl >= 0 ? 'PROFIT' : 'LOSS'} ${signed(pnl)} ${ccy} (${signed(pct)}%) | ${totalsText(bot.stats, ccy)}`, { unrealized: pnl, pct, mode: bot.mode, totalPnl: bot.stats?.pnl || 0 });
+    }
     if (bot.strategy === 'dca') return await dcaTick(bot, user, signal, price, lastClosed.time);
     if (risk?.approved) {
       await openPosition(bot, user, signal, { notional: risk.position.notional, riskPct: risk.finalRiskPct, equity: risk.account.equity }, closed, lastClosed.time);

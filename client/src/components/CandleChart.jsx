@@ -22,7 +22,7 @@ const OVERLAY_STYLE = {
 
 const toLine = (candles, arr) => candles.map((c, i) => (arr?.[i] == null ? null : { time: c.time, value: arr[i] })).filter(Boolean);
 
-export default function CandleChart({ data, show = {}, markers = [], live, height = 470, signalLevels }) {
+export default function CandleChart({ data, show = {}, markers = [], live, height = 470, signalLevels, priceLines }) {
   const box = useRef(null);
   const chart = useRef(null);
   const series = useRef({});
@@ -75,7 +75,8 @@ export default function CandleChart({ data, show = {}, markers = [], live, heigh
       add(signalLevels.stopLoss, '#ea3943', 'AI SL', LineStyle.Dashed);
       add(signalLevels.takeProfit, '#16c784', 'AI TP', LineStyle.Dashed);
     }
-  }, [data, show.levels, signalLevels]);
+    (priceLines || []).forEach((l) => l.price > 0 && add(l.price, l.color, l.title, l.style ?? LineStyle.Dashed));
+  }, [data, show.levels, signalLevels, priceLines]);
 
   useEffect(() => {
     series.current.candles?.setMarkers([...markers].sort((a, b) => a.time - b.time));

@@ -37,7 +37,7 @@ const bad = (msg, status = 400) => Object.assign(new Error(msg), { status });
 r.use((req, res, next) => (req.user ? next() : res.status(401).json({ error: 'Please sign in' })));
 
 const SYMBOL_RE = /^[A-Z0-9][A-Z0-9&-]{0,19}$/; // crypto pairs, NSE forex pairs and NSE stocks (M&M, BAJAJ-AUTO)
-const INTERVALS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w'];
+const INTERVALS = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w', '1M'];
 const sym = (s) => {
   const v = String(s || 'BTCUSDT').toUpperCase();
   if (!SYMBOL_RE.test(v)) throw bad('Invalid symbol');
@@ -194,7 +194,7 @@ r.post('/strategies/benchmark', wrap(async (req, res) => {
 }));
 
 // ---------- Bots ----------
-const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage'];
+const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage', 'maxHoldMin'];
 const pickBot = (body, user) => {
   const out = {};
   BOT_FIELDS.forEach((k) => body[k] !== undefined && (out[k] = body[k]));
@@ -215,7 +215,7 @@ const pickBot = (body, user) => {
     const exId = out.exchange || body.exchange || 'binance';
     if (out.allowShort && !EXCHANGES[exId]?.canShort) throw bad(`${EXCHANGES[exId]?.name || exId} cannot be sold short - shorts are available on NSE forex and NSE futures`);
   }
-  ['threshold', 'riskPct', 'maxPositionPct', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct'].forEach((k) => out[k] !== undefined && (out[k] = Number(out[k])));
+  ['threshold', 'riskPct', 'maxPositionPct', 'trailAtr', 'dailyLossLimitPct', 'maxHoldMin', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct'].forEach((k) => out[k] !== undefined && (out[k] = Number(out[k])));
   if (out.leverage !== undefined) {
     const lev = Number(out.leverage);
     if (!(lev >= 1 && lev <= PERP_MAX_LEVERAGE)) throw bad(`Leverage must be 1-${PERP_MAX_LEVERAGE}x`);
@@ -241,6 +241,13 @@ r.post('/bots', wrap(async (req, res) => {
   if (!data.name) data.name = `${baseAsset(data.symbol)} ${getStrategy(data.strategy).name}`;
   const bot = await db.bots.insert({ ...data, userId: uid(req), status: 'stopped', position: null, stats: { trades: 0, wins: 0, pnl: 0 } });
   await audit(uid(req), 'bot.create', { name: bot.name, mode: bot.mode, exchange: bot.exchange }, req);
+  // "Start automatically" (default on): the bot begins trading on its own right away.
+  if (req.body?.autoStart !== false && (await getSettings(uid(req))).tradingEnabled && !(getStrategy(bot.strategy)?.liveOnly && !hasClaude())) {
+    const started = await db.bots.update(bot._id, { status: 'running', lastCandleTime: null, pausedReason: null });
+    startBot(bot._id);
+    await audit(uid(req), 'bot.start', { name: bot.name, mode: bot.mode }, req);
+    return res.json(started);
+  }
   res.json(bot);
 }));
 

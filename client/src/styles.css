@@ -248,7 +248,9 @@ tr.clickable { cursor: pointer; }
 .log-line { display: grid; grid-template-columns: 74px 70px 1fr; gap: 10px; padding: 6px 4px; border-bottom: 1px solid var(--line); }
 .log-line .lvl { font-weight: 700; text-transform: uppercase; font-size: 10.5px; }
 .lvl.info { color: #6ea8ff; } .lvl.trade { color: var(--accent); } .lvl.profit { color: var(--up); }
-.lvl.loss, .lvl.error { color: var(--down); } .lvl.warn { color: var(--warn); }
+.lvl.loss, .lvl.error { color: var(--down); } .lvl.warn { color: var(--warn); } .lvl.pnl { color: #c084fc; }
+.pnl-summary { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font-family: var(--mono); font-size: 12px; }
+.pnl-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; }
 
 /* ---------- Chat ---------- */
 .chat { display: flex; flex-direction: column; height: calc(100vh - 140px); }
@@ -917,3 +919,15 @@ th { font-size: 10.5px; font-weight: 700; letter-spacing: 0.16em; }
 .bq-dot.running { background: var(--up); animation: pulse 1.8s infinite; }
 .bq-dot.paused { background: var(--warn); }
 @media (max-width: 560px) { .bot-quick, .setup-steps { grid-template-columns: 1fr; } }
+
+/* SPOT | FUTURES market switch (Terminal) */
+.market-switch { display: inline-flex; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 3px; gap: 3px; }
+.market-switch button { border: none; background: transparent; color: var(--text-3); cursor: pointer; padding: 7px 16px; border-radius: 9px; font-weight: 800; font-size: 13px; letter-spacing: 0.06em; display: flex; flex-direction: column; align-items: center; line-height: 1.15; }
+.market-switch button small { font-size: 9.5px; font-weight: 600; letter-spacing: 0; opacity: 0.8; }
+.market-switch button.on.spot { background: rgba(22, 199, 132, 0.16); color: var(--up); box-shadow: inset 0 0 0 1px rgba(22, 199, 132, 0.45); }
+.market-switch button.on.fut { background: rgba(245, 165, 36, 0.16); color: var(--warn); box-shadow: inset 0 0 0 1px rgba(245, 165, 36, 0.45); }
+.order-tabs { display: grid; grid-template-columns: 1fr 1fr; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 3px; }
+.order-tabs button { border: none; background: transparent; color: var(--text-2); padding: 8px; border-radius: 7px; font-weight: 700; cursor: pointer; }
+.order-tabs button.on { background: var(--panel-2); color: var(--text); }
+.order-tabs button.on.buy { background: rgba(22, 199, 132, 0.18); color: var(--up); }
+.order-tabs button.on.sell { background: rgba(234, 57, 67, 0.18); color: var(--down); }
