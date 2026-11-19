@@ -5,6 +5,7 @@ import { usePoll, useServerEvents } from '../lib/hooks.js';
 import { useApp } from '../lib/AppContext.jsx';
 import { CoinIcon, ActionBadge, FearGreed, Empty } from '../components/ui.jsx';
 import TradingStatus from '../components/TradingStatus.jsx';
+import RunningTrades from '../components/RunningTrades.jsx';
 import { SetupChecklist, BotQuickControl } from '../components/ControlCenter.jsx';
 import { fmtUsd, fmtMoney, fmtPct, fmtPrice, fmtCompact, fmtQty, ago, tone, baseOf, quoteOf } from '../lib/format.js';
 
@@ -29,6 +30,7 @@ export default function Dashboard() {
 
   return (
     <>
+      <RunningTrades />
       <div className="grid g-4">
         <div className="card stat">
           <span className="stat-icon"><Wallet size={18} /></span>

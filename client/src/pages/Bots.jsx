@@ -10,7 +10,7 @@ import { fmtPrice, fmtMoney, fmtPct, fmtQty, ago, tone, baseOf, quoteOf, FX_PAIR
 const DEFAULTS = {
   // EMA Trend on 4h was the only strategy profitable on train, validation and out-of-sample data (2020-2026).
   name: '', autoStart: true, symbol: 'BTCUSDT', interval: '4h', strategy: 'ema_trend', mode: 'paper', useClaude: false,
-  threshold: 30, riskPct: 1, maxPositionPct: 25, maxHoldMin: 0, trailingStop: true, trailAtr: 2.5, dailyLossLimitPct: 5,
+  threshold: 30, riskPct: 1, maxPositionPct: 25, maxHoldMin: 0, forceTrade: false, trailingStop: true, trailAtr: 2.5, dailyLossLimitPct: 5,
   dcaEvery: 24, dcaTranchePct: 5, dcaMaxTranches: 6, dcaTakeProfitPct: 4,
 };
 
@@ -114,6 +114,14 @@ function BotForm({ initial, onClose, onSaved }) {
                 </div>
                 <Switch checked={f.useClaude} onChange={set('useClaude')} />
               </div>
+              <div className="row between card" style={{ padding: 12, borderColor: f.forceTrade ? 'rgba(245,165,36,0.6)' : undefined }}>
+                <div>
+                  <div className="row bold small" style={{ gap: 6 }}>⚡ Trade every candle</div>
+                  <div className="tiny muted">Every {f.interval} candle the bot automatically sells the open trade and buys a new one (direction from the AI score), without waiting for an approved signal. Safety limits (kill switch, daily loss limit, exposure) still apply.</div>
+                  {f.forceTrade && <div className="tiny" style={{ marginTop: 4, color: 'var(--warn)' }}>Many trades = many fees. On 1m this usually loses money to fees and spread. Test on Paper first{f.mode === 'live' ? ' - this bot is LIVE and will trade real money every candle' : ''}.</div>}
+                </div>
+                <Switch checked={Boolean(f.forceTrade)} onChange={set('forceTrade')} />
+              </div>
               {exInfo?.canShort && (
                 <div className="row between card" style={{ padding: 12 }}>
                   <div>
@@ -189,6 +197,7 @@ function BotCard({ bot, price, onChange, onSelect, selected }) {
           {bot.copyable && <span className="badge accent" title="Shared on the copy-trading leaderboard">Shared</span>}
           {bot.useClaude && <span className="badge ai"><Sparkles size={11} /> Claude</span>}
           {bot.allowShort && <span className="badge short">Shorts on</span>}
+          {bot.forceTrade && <span className="badge" style={{ color: 'var(--warn)' }} title="Buys and sells every candle">⚡ Every {bot.interval}</span>}
           <span className={`badge ${bot.mode === 'live' ? 'down' : 'accent'}`}>{bot.mode.toUpperCase()}</span>
           <span className="row tiny" style={{ gap: 6 }}><span className={`dot ${running ? 'live' : paused ? 'bad' : 'off'}`} />{running ? 'Running' : paused ? 'Paused' : 'Stopped'}</span>
         </div>
@@ -229,7 +238,7 @@ function BotCard({ bot, price, onChange, onSelect, selected }) {
           </div>
         </div>
       ) : (
-        <div className="position-box muted small">{bot.grid ? `Grid active: ${bot.grid.levels.length} levels ${fmtPrice(bot.grid.lower)} – ${fmtPrice(bot.grid.upper)}, waiting for price to reach a level.` : running ? (bot.strategy === 'grid' ? 'Waiting for a sideways / low-volatility regime to build the grid.' : <>AUTO mode: the bot will buy / sell by itself when a signal is approved (threshold {bot.threshold}). Checks once per {bot.interval} candle.{ls ? <div style={{ marginTop: 4 }}>Last check: <b>{ls.signal || 'WAIT'}</b>{ls.rejectedBy?.length ? <> · not traded because: <span className="down">{ls.rejectedBy.join(', ')}</span></> : ls.signal === 'WAIT' ? ' · no setup yet' : ''}</div> : <div style={{ marginTop: 4 }}>Waiting for the first {bot.interval} candle to close…</div>}</>) : paused ? 'Paused by the safety system.' : 'Bot is stopped.'}</div>
+        <div className="position-box muted small">{bot.grid ? `Grid active: ${bot.grid.levels.length} levels ${fmtPrice(bot.grid.lower)} – ${fmtPrice(bot.grid.upper)}, waiting for price to reach a level.` : running ? (bot.strategy === 'grid' ? 'Waiting for a sideways / low-volatility regime to build the grid.' : <>{bot.forceTrade ? <>⚡ Trade-every-candle: the bot buys at the next {bot.interval} candle close and sells at the one after.</> : <>AUTO mode: the bot will buy / sell by itself when a signal is approved (threshold {bot.threshold}). Checks once per {bot.interval} candle.</>}{ls ? <div style={{ marginTop: 4 }}>Last check: <b>{ls.signal || 'WAIT'}</b>{ls.rejectedBy?.length ? <> · not traded because: <span className="down">{ls.rejectedBy.join(', ')}</span></> : ls.signal === 'WAIT' ? ' · no setup yet' : ''}</div> : <div style={{ marginTop: 4 }}>Waiting for the first {bot.interval} candle to close…</div>}</>) : paused ? 'Paused by the safety system.' : 'Bot is stopped.'}</div>
       )}
       {ls?.claude && <div className="ai-reason small"><b className="row" style={{ gap: 6, marginBottom: 4 }}><Sparkles size={13} color="#b3a1ff" /> Claude</b>{ls.claude}</div>}
 

@@ -194,7 +194,7 @@ r.post('/strategies/benchmark', wrap(async (req, res) => {
 }));
 
 // ---------- Bots ----------
-const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage', 'maxHoldMin'];
+const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage', 'maxHoldMin', 'forceTrade'];
 const pickBot = (body, user) => {
   const out = {};
   BOT_FIELDS.forEach((k) => body[k] !== undefined && (out[k] = body[k]));
@@ -210,6 +210,7 @@ const pickBot = (body, user) => {
     if (st.custom && st.ownerId !== user._id) throw bad('That custom strategy belongs to someone else');
   }
   if (out.mode && !['paper', 'live'].includes(out.mode)) throw bad('mode must be paper or live');
+  if (out.forceTrade !== undefined) out.forceTrade = Boolean(out.forceTrade);
   if (out.allowShort !== undefined) {
     out.allowShort = Boolean(out.allowShort);
     const exId = out.exchange || body.exchange || 'binance';

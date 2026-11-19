@@ -39,6 +39,7 @@ export const BOT_DEFAULTS = {
   trailAtr: 2.5,
   dailyLossLimitPct: 5,
   leverage: 2, // perpetuals only (1-5x, isolated)
+  forceTrade: false, // true = trade every candle: close the open trade and open a new one at each candle close
   maxHoldMin: 0, // 0 = off; otherwise the bot sells (or covers) a trade automatically after this many minutes
 };
 
@@ -564,6 +565,27 @@ async function tick(botId) {
       await log(bot, 'pnl', `${modeTag(bot)} OPEN ${(bot.position.side || 'long').toUpperCase()} ${bot.symbol}: entry ${bot.position.entry.toFixed(4)} -> now ${price.toFixed(4)} | unrealized ${pnl >= 0 ? 'PROFIT' : 'LOSS'} ${signed(pnl)} ${ccy} (${signed(pct)}%) | ${totalsText(bot.stats, ccy)}`, { unrealized: pnl, pct, mode: bot.mode, totalPnl: bot.stats?.pnl || 0 });
     }
     if (bot.strategy === 'dca') return await dcaTick(bot, user, signal, price, lastClosed.time);
+    // "Trade every candle" mode: at each candle close, sell (or cover) the open trade, then open a new one in the
+    // direction the AI leans (score >= 0 long, < 0 short when shorts are allowed). Signal-quality gates are skipped;
+    // the safety gates (kill switch, daily loss limit, open positions, exposure, leverage, liquidation) still apply.
+    if (bot.forceTrade && bot.strategy !== 'grid') {
+      if (bot.position) {
+        await closePosition(bot, user, price, 'Trade-every-candle: candle closed', signal, { atr, regime: signal.regime?.name });
+        bot = await db.bots.findOne({ _id: botId });
+        if (bot.position) return;
+      }
+      const dir = signal.score < 0 && bot.allowShort && adapter.canShort ? 'SHORT' : 'LONG';
+      const d = dir === 'SHORT' ? -1 : 1;
+      const slDist = Math.abs(price - signal.stopLoss) || 1.5 * atr;
+      const tpDist = Math.abs(signal.takeProfit - price) || 2 * atr;
+      const forced = { ...signal, signal: dir, price, stopLoss: price - d * slDist, takeProfit: price + d * tpDist };
+      const r = await evaluateRisk(forced, { user, bot, mode: bot.mode, exchange: bot.exchange });
+      const HARD = ['Kill switch', 'Daily loss limit', 'Open positions', 'Exposure', 'Leverage', 'Liquidation buffer'];
+      const blocked = r.gates.filter((g) => !g.pass && HARD.includes(g.name)).map((g) => g.name);
+      if (blocked.length) return log(bot, 'warn', `${modeTag(bot)} Trade-every-candle: no new trade - blocked by safety (${blocked.join(', ')})`);
+      const notional = r.approved ? r.position.notional : +((r.account.equity * (bot.maxPositionPct || 25)) / 100).toFixed(2);
+      return await openPosition(bot, user, forced, { notional, riskPct: r.finalRiskPct, equity: r.account.equity }, closed, lastClosed.time);
+    }
     if (risk?.approved) {
       await openPosition(bot, user, signal, { notional: risk.position.notional, riskPct: risk.finalRiskPct, equity: risk.account.equity }, closed, lastClosed.time);
     } else if (signal.signal === 'EXIT' && bot.position) {
