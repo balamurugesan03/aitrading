@@ -29,6 +29,7 @@ function BotForm({ initial, onClose, onSaved }) {
   const crypto = exInfo && !fx && !stocks && !futures && exInfo.market !== 'options';
   // Every USDT coin the selected exchange lists (spot, or USD-M perpetuals for Binance futures).
   const [coinList] = usePoll(crypto ? `/market/symbols?quote=USDT&exchange=${f.exchange}` : null, 0, [f.exchange, crypto]);
+  const [coinQuery, setCoinQuery] = useState('');
   const nseSymbol = (s, fallback) => (FX_PAIRS.includes(s) || isCryptoSymbol(s) ? fallback : s);
   // Switching the bot's exchange between crypto and NSE forex resets the pair and an unsupported timeframe.
   useEffect(() => {
@@ -75,8 +76,31 @@ function BotForm({ initial, onClose, onSaved }) {
               ? <select className="select" value={f.symbol} onChange={set('symbol')}>{['USDINR', 'EURINR', 'GBPINR', 'JPYINR'].map((p) => <option key={p} value={p}>{p}</option>)}</select>
               : futures
                 ? <><input className="input mono" list="nfut-symbols" value={f.symbol} onChange={set('symbol')} placeholder="NIFTY" /><datalist id="nfut-symbols">{INDEX_FUTURES.map((s) => <option key={s} value={s} />)}</datalist></>
-                : <><input className="input mono" list={crypto ? 'bot-coins' : undefined} value={f.symbol} onChange={set('symbol')} placeholder={stocks ? 'RELIANCE' : coinList ? `Search ${coinList.length} coins` : 'BTCUSDT'} />
-                  {crypto && <datalist id="bot-coins">{(coinList || []).map((c) => <option key={c} value={c} />)}</datalist>}</>}</Field>
+                : crypto && coinList?.length
+                  ? (() => {
+                    // Every coin of the exchange in a dropdown; the search box above it narrows the list.
+                    const q = coinQuery.trim().toUpperCase();
+                    const shown = coinList.filter((c) => !q || c.includes(q));
+                    const opts = shown.includes(f.symbol) || !coinList.includes(f.symbol) ? shown : [f.symbol, ...shown];
+                    return (
+                      <div className="col" style={{ gap: 6 }}>
+                        <input className="input" value={coinQuery} onChange={(e) => {
+                          const v = e.target.value;
+                          setCoinQuery(v);
+                          // Typing a coin selects it: exact name first (ICP -> ICPUSDT), else the first coin that starts with it, else the first match.
+                          const t = v.trim().toUpperCase();
+                          const pick = t && (coinList.find((c) => c === t || c === `${t}USDT`) || coinList.find((c) => c.startsWith(t)) || coinList.find((c) => c.includes(t)));
+                          if (pick) setF((s) => ({ ...s, symbol: pick }));
+                        }} placeholder={`🔍 Search ${coinList.length} coins (e.g. ICP, PEPE)`} />
+                        <select className="select mono" value={f.symbol} onChange={set('symbol')}>
+                          {!coinList.includes(f.symbol) && <option value={f.symbol}>{f.symbol}</option>}
+                          {opts.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        <span className="tiny muted">{q ? `${shown.length} match${shown.length === 1 ? '' : 'es'}` : `All ${coinList.length} coins`} · selected: <b>{f.symbol}</b></span>
+                      </div>
+                    );
+                  })()
+                  : <input className="input mono" value={f.symbol} onChange={set('symbol')} placeholder={stocks ? 'RELIANCE' : 'BTCUSDT'} />}</Field>
           </div>
           <Field label="AI strategy" hint={strat ? `${strat.description}${strat.timeframes?.length ? ` Best on ${strat.timeframes.join(', ')}.` : ''}` : ''}>
             <select className="select" value={f.strategy} onChange={set('strategy')}>
