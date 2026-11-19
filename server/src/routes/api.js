@@ -194,7 +194,7 @@ r.post('/strategies/benchmark', wrap(async (req, res) => {
 }));
 
 // ---------- Bots ----------
-const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage', 'maxHoldMin', 'forceTrade'];
+const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage', 'maxHoldMin', 'forceTrade', 'stopAfterTrade', 'takeProfitPct', 'onlyProfitExit', 'tradeAmount', 'takeProfitUsd', 'stopLossUsd'];
 const pickBot = (body, user) => {
   const out = {};
   BOT_FIELDS.forEach((k) => body[k] !== undefined && (out[k] = body[k]));
@@ -211,12 +211,16 @@ const pickBot = (body, user) => {
   }
   if (out.mode && !['paper', 'live'].includes(out.mode)) throw bad('mode must be paper or live');
   if (out.forceTrade !== undefined) out.forceTrade = Boolean(out.forceTrade);
+  if (out.stopAfterTrade !== undefined) out.stopAfterTrade = Boolean(out.stopAfterTrade);
+  if (out.onlyProfitExit !== undefined) out.onlyProfitExit = Boolean(out.onlyProfitExit);
   if (out.allowShort !== undefined) {
     out.allowShort = Boolean(out.allowShort);
     const exId = out.exchange || body.exchange || 'binance';
     if (out.allowShort && !EXCHANGES[exId]?.canShort) throw bad(`${EXCHANGES[exId]?.name || exId} cannot be sold short - shorts are available on NSE forex and NSE futures`);
   }
-  ['threshold', 'riskPct', 'maxPositionPct', 'trailAtr', 'dailyLossLimitPct', 'maxHoldMin', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct'].forEach((k) => out[k] !== undefined && (out[k] = Number(out[k])));
+  ['threshold', 'riskPct', 'maxPositionPct', 'trailAtr', 'dailyLossLimitPct', 'maxHoldMin', 'takeProfitPct', 'tradeAmount', 'takeProfitUsd', 'stopLossUsd', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct'].forEach((k) => out[k] !== undefined && (out[k] = Number(out[k])));
+  if (out.takeProfitPct !== undefined && !(out.takeProfitPct >= 0 && out.takeProfitPct <= 100)) throw bad('Take profit % must be 0-100 (0 = AI target)');
+  for (const k of ['tradeAmount', 'takeProfitUsd', 'stopLossUsd']) if (out[k] !== undefined && !(out[k] >= 0)) throw bad(`${k} must be 0 or more (0 = off)`);
   if (out.leverage !== undefined) {
     const lev = Number(out.leverage);
     if (!(lev >= 1 && lev <= PERP_MAX_LEVERAGE)) throw bad(`Leverage must be 1-${PERP_MAX_LEVERAGE}x`);

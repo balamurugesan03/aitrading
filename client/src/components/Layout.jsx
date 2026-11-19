@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Outlet, useLocation, Link } from 'react-router-dom';
 import {
-  LayoutDashboard, CandlestickChart, Radar, Bot, FlaskConical, MessageSquareText, History, Settings,
+  Home as HomeIcon, LayoutDashboard, CandlestickChart, Radar, Bot, FlaskConical, MessageSquareText, History, Settings,
   PieChart, Globe2, Library, NotebookPen, BrainCircuit, ShieldCheck, OctagonX, Power, Bell, Users, Store,
   UserCircle, Code2, Crown, LogOut, Download, Layers, Menu, X, Eye, EyeOff, Info,
 } from 'lucide-react';
@@ -14,7 +14,8 @@ import { fmtPrice, fmtPct, baseOf, ago } from '../lib/format.js';
 
 // simple: shown in the "Simple view" sidebar (the default). help: the one-line "what is this page" shown above every page.
 const NAV = [
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, group: 'Overview', simple: true, tab: 'Home', help: 'Your control center: money, profit/loss, what is ON, and your bots at a glance.' },
+  { to: '/', label: 'Home', icon: HomeIcon, group: 'Overview', simple: true, tab: 'Home' },
+  { to: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, group: 'Overview', simple: true, tab: 'Dashboard', help: 'Your control center: money, profit/loss, what is ON, and your bots at a glance.' },
   { to: '/history', label: 'P&L History', icon: History, group: 'Overview', simple: true, tab: 'P&L', help: 'How much you invested, how much came back, profit or loss - and why. Pick any time range.' },
   { to: '/portfolio', label: 'Portfolio AI', icon: PieChart, group: 'Overview', help: 'What you hold, how it is spread, and how risky the mix is.' },
   { to: '/bots', label: 'My AI Bots', icon: Bot, group: 'Trade', simple: true, tab: 'Bots', help: 'Create, start and stop the bots that trade for you. Start in Paper mode to practise with fake money.' },

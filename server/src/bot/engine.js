@@ -19,7 +19,7 @@ import { getSettings, updateSettings, health, abnormalPrice, staleData, orderCoo
 import { notify } from '../notify.js';
 
 export const events = new EventEmitter();
-const TICK_MS = 15000;
+const TICK_MS = 5000; // open trades are checked this often, so a profit target or max loss closes within ~5 s
 const timers = new Map();
 const busy = new Set();
 const errorCount = new Map();
@@ -41,6 +41,12 @@ export const BOT_DEFAULTS = {
   leverage: 2, // perpetuals only (1-5x, isolated)
   forceTrade: false, // true = trade every candle: close the open trade and open a new one at each candle close
   maxHoldMin: 0, // 0 = off; otherwise the bot sells (or covers) a trade automatically after this many minutes
+  stopAfterTrade: false, // true = the bot stops itself once its trade is fully closed (one trade, then stop)
+  takeProfitPct: 0, // 0 = the AI's ATR-based target; otherwise sell (or cover) once the trade is this many % in profit
+  tradeAmount: 0, // 0 = risk-engine sizing; otherwise a fixed trade size (notional) in the quote currency, e.g. 100 USDT
+  takeProfitUsd: 0, // 0 = off; otherwise close once the trade's profit reaches this amount (quote currency)
+  stopLossUsd: 0, // 0 = off; otherwise close once the trade's loss reaches this amount - always, even with onlyProfitExit
+  onlyProfitExit: false, // true = automatic exits only in profit: no stop-loss, max-hold, candle-close or AI exit at a loss
 };
 
 const userCache = new Map();
@@ -68,6 +74,11 @@ function openPnl(pos, price) {
   const pnl = pos.side === 'short' ? pos.cost - price * pos.qty : price * pos.qty - pos.cost;
   return { pnl, pct: pos.cost ? (pnl / pos.cost) * 100 : 0 };
 }
+// "Close only in profit": an automatic exit needs the trade this far in profit, so the exit fee and spread still leave a gain.
+const MIN_EXIT_PROFIT_PCT = 0.2;
+const inProfit = (pos, price) => openPnl(pos, price).pct > MIN_EXIT_PROFIT_PCT;
+// true = the bot must keep holding: "Close only in profit" is on and the trade is not (enough) in profit at this price.
+const holdAtLoss = (bot, price) => Boolean(bot.onlyProfitExit && bot.position && !inProfit(bot.position, price));
 // "Total P&L +12.34 USDT (3 trades, 2 wins)" from the bot's realized stats.
 function totalsText(stats, ccy) {
   const s = stats || { trades: 0, wins: 0, pnl: 0 };
@@ -124,13 +135,14 @@ const qtyText = async (exchange, symbol, qty) => {
 
 async function openPosition(bot, user, signal, sizing, candles, candleTime) {
   const key = `bot:${bot._id}`;
+  if ((await db.bots.findOne({ _id: bot._id }))?.position) return log(bot, 'warn', `${modeTag(bot)} Skipped a new ${signal.signal} on ${bot.symbol}: this bot already holds an open position`);
   const settings = await getSettings(user._id);
   const dup = orderCooldown(key, settings.risk.orderCooldownSec);
   if (dup) return log(bot, 'warn', dup);
   markOrder(key);
   const short = signal.signal === 'SHORT';
   const { fill, info } = await executeOrder({
-    user, bot, mode: bot.mode, exchange: bot.exchange, symbol: bot.symbol, side: short ? 'SELL' : 'BUY', quoteAmount: sizing.notional, short, leverage: bot.leverage,
+    user, bot, mode: bot.mode, exchange: bot.exchange, symbol: bot.symbol, side: short ? 'SELL' : 'BUY', quoteAmount: Number(bot.tradeAmount) > 0 ? Number(bot.tradeAmount) : sizing.notional, short, leverage: bot.leverage,
     reason: `${signal.signal} p=${(signal.probability * 100).toFixed(0)}% ${signal.quality} (${signal.strategyName})`, signal,
     clientOrderId: `nx${bot._id.slice(0, 8)}${candleTime}${short ? 'X' : 'B'}`,
   });
@@ -141,7 +153,8 @@ async function openPosition(bot, user, signal, sizing, candles, candleTime) {
   const position = {
     side: short ? 'short' : 'long',
     qty: fill.qty, entry: fill.price, cost: fill.cost,
-    stopLoss: fill.price - dir * slDist, initialStop: fill.price - dir * slDist, takeProfit: fill.price + dir * tpDist,
+    stopLoss: fill.price - dir * slDist, initialStop: fill.price - dir * slDist,
+    takeProfit: Number(bot.takeProfitPct) > 0 ? fill.price * (1 + (dir * Number(bot.takeProfitPct)) / 100) : fill.price + dir * tpDist,
     highest: fill.price, lowest: fill.price, openedAt: Date.now(),
     entryContext: entryContext(signal, candles),
     riskPct: sizing.riskPct,
@@ -175,6 +188,17 @@ const heldOnExchange = async (client, bot) => {
 async function syncExchangeStop(bot, user, price) {
   const pos = bot?.position;
   const short = pos?.side === 'short';
+  // "Close only in profit": no resting stop on the exchange until the (trailing) stop itself sits in profit.
+  if (pos && bot.mode === 'live' && bot.onlyProfitExit && !(Number(bot.stopLossUsd) > 0) && !(pos.stopLoss > 0 && inProfit(pos, pos.stopLoss))) {
+    if (pos.stopOrder) {
+      const { client } = await tradingFor(user, bot.exchange);
+      await client.cancelOrder(bot.symbol, pos.stopOrder.orderId);
+      if ((await client.getOrder(bot.symbol, pos.stopOrder.orderId)).executedQty > 0) return closePosition(bot, user, price, 'Exchange stop-loss filled');
+      await db.bots.update(bot._id, { position: { ...pos, stopOrder: null } });
+      await log(bot, 'info', 'Exchange stop-loss removed: "Close only in profit" is on');
+    }
+    return;
+  }
   if (!pos || bot.mode !== 'live' || bot.grid || !(pos.stopLoss > 0) || (short ? pos.stopLoss <= price : pos.stopLoss >= price) || pos.exchangeStop === 'unsupported') return;
   const { client } = await tradingFor(user, bot.exchange);
   if (!client.stopLossOrder) {
@@ -322,6 +346,14 @@ async function closePosition(bot, user, price, reason, signal, exitCtx = {}) {
   if (bot.copyable) events.emit('copy:close', { bot, reason });
   const j = await journalClosedTrade({ bot, position: pos, exit: { price: exitPrice, pnl, reason, ...exitCtx } }).catch(() => null);
   if (j) events.emit('journal', j);
+  // "Stop after one trade": once the position is fully closed, the bot stops instead of looking for the next trade.
+  if (bot.stopAfterTrade && !leftover) {
+    stopTimer(bot._id);
+    await db.bots.update(bot._id, { status: 'stopped' });
+    await log(bot, 'info', `Bot stopped: trade closed (${reason}) and "Stop after one trade" is on`);
+    notify(user._id, { type: 'info', title: `${bot.name} stopped`, body: 'One trade done - start the bot again for the next trade', important: bot.mode === 'live' });
+    events.emit('bot', { botId: bot._id, userId: bot.userId, status: 'stopped' });
+  }
 }
 
 // Paper perpetuals: the broker liquidated this bot's position (mark crossed the liquidation price). Attribute the
@@ -501,23 +533,48 @@ async function tick(botId) {
     if (bot.position && bot.strategy !== 'dca') {
       const p = bot.position;
       const patch = { highest: Math.max(p.highest ?? p.entry, price), lowest: Math.min(p.lowest ?? p.entry, price) };
+      // Fixed take-profit %: also applies to a trade that was already open when the setting was changed.
+      const tpPct = Number(bot.takeProfitPct) || 0;
+      if (tpPct > 0 && !p.gridLots) {
+        const tp = +(p.entry * (1 + ((p.side === 'short' ? -1 : 1) * tpPct) / 100)).toPrecision(10);
+        if (tp !== p.takeProfit) patch.takeProfit = tp;
+      }
+      // Fixed profit / loss amounts (quote currency) -> prices. Long: pnl = price*qty - cost. Short: pnl = cost - price*qty.
+      const dirP = p.side === 'short' ? -1 : 1;
+      const tpUsd = Number(bot.takeProfitUsd) || 0;
+      const slUsd = Number(bot.stopLossUsd) || 0;
+      if (tpUsd > 0 && p.qty > 0 && !p.gridLots) {
+        const tp = +((p.cost + dirP * tpUsd) / p.qty).toPrecision(10);
+        if (tp !== p.takeProfit) patch.takeProfit = tp;
+      }
+      // The fixed stop is set once per value; after that the trailing stop may only tighten it.
+      if (slUsd > 0 && p.qty > 0 && !p.gridLots && p.slUsd !== slUsd) {
+        patch.stopLoss = +((p.cost - dirP * slUsd) / p.qty).toPrecision(10);
+        patch.initialStop = patch.stopLoss;
+        patch.slUsd = slUsd;
+        patch.stopOrder = p.stopOrder; // re-synced (moved) by syncExchangeStop below
+      }
       // A strategy that defines its own trailing width (rule strategies) uses it; others use the bot's setting.
       const trailFn = p.side === 'short' ? trailStopShort : trailStop;
       if (bot.trailingStop) Object.assign(patch, trailFn({ ...p, ...patch }, price, getStrategy(bot.strategy)?.trail ?? bot.trailAtr, atr));
-      if (patch.highest !== p.highest || patch.lowest !== p.lowest || patch.stopLoss !== p.stopLoss) {
+      if (patch.highest !== p.highest || patch.lowest !== p.lowest || patch.stopLoss !== p.stopLoss || patch.takeProfit !== undefined) {
         bot = await db.bots.update(bot._id, { position: { ...p, ...patch } });
       }
       events.emit('position', { botId, userId: bot.userId, price, position: bot.position });
       const regimeNow = last(regimeSeries(closed, ind));
       const exitCtx = { atr, regime: regimeNow?.regime };
       const isShort = bot.position.side === 'short';
-      if (isShort ? price >= bot.position.stopLoss : price <= bot.position.stopLoss) return await closePosition(bot, user, price, 'Stop-loss hit', null, exitCtx);
+      // Fixed amounts are checked first, on every tick (~5 s): no waiting for the candle to close.
+      const { pnl: uPnl } = openPnl(bot.position, price);
+      if (slUsd > 0 && uPnl <= -slUsd) return await closePosition(bot, user, price, `Max loss ${slUsd} reached`, null, exitCtx);
+      if (tpUsd > 0 && uPnl >= tpUsd) return await closePosition(bot, user, price, `Profit target +${tpUsd} reached`, null, exitCtx);
+      if (!holdAtLoss(bot, price) && (isShort ? price >= bot.position.stopLoss : price <= bot.position.stopLoss)) return await closePosition(bot, user, price, bot.onlyProfitExit ? 'Trailing stop (profit locked)' : 'Stop-loss hit', null, exitCtx);
       // Futures: exit a day before the contract expires; the next entry uses the new front month.
       if (bot.position.contractExpiry && Date.now() > bot.position.contractExpiry - 86400e3) return await closePosition(bot, user, price, 'Futures contract expiry (rolled out)', null, exitCtx);
       if (isShort ? price <= bot.position.takeProfit : price >= bot.position.takeProfit) return await closePosition(bot, user, price, 'Take-profit hit', null, exitCtx);
       // Max hold time: exit automatically once the trade has been open this long (checked every 15 s).
       const holdMin = Number(bot.maxHoldMin) || 0;
-      if (holdMin > 0 && bot.position.openedAt && Date.now() - bot.position.openedAt >= holdMin * 60000) return await closePosition(bot, user, price, `Max hold time ${holdMin} min reached`, null, exitCtx);
+      if (holdMin > 0 && !holdAtLoss(bot, price) && bot.position.openedAt && Date.now() - bot.position.openedAt >= holdMin * 60000) return await closePosition(bot, user, price, `Max hold time ${holdMin} min reached`, null, exitCtx);
       if (bot.mode === 'live') {
         await syncExchangeStop(bot, user, price);
         bot = await db.bots.findOne({ _id: botId });
@@ -570,9 +627,10 @@ async function tick(botId) {
     // the safety gates (kill switch, daily loss limit, open positions, exposure, leverage, liquidation) still apply.
     if (bot.forceTrade && bot.strategy !== 'grid') {
       if (bot.position) {
+        if (holdAtLoss(bot, price)) return log(bot, 'info', `${modeTag(bot)} Candle closed but the trade is not in profit - holding ("Close only in profit" is on)`);
         await closePosition(bot, user, price, 'Trade-every-candle: candle closed', signal, { atr, regime: signal.regime?.name });
         bot = await db.bots.findOne({ _id: botId });
-        if (bot.position) return;
+        if (bot.position || bot.status !== 'running') return;
       }
       const dir = signal.score < 0 && bot.allowShort && adapter.canShort ? 'SHORT' : 'LONG';
       const d = dir === 'SHORT' ? -1 : 1;
@@ -588,7 +646,7 @@ async function tick(botId) {
     }
     if (risk?.approved) {
       await openPosition(bot, user, signal, { notional: risk.position.notional, riskPct: risk.finalRiskPct, equity: risk.account.equity }, closed, lastClosed.time);
-    } else if (signal.signal === 'EXIT' && bot.position) {
+    } else if (signal.signal === 'EXIT' && bot.position && !holdAtLoss(bot, price)) {
       await closePosition(bot, user, price, `AI exit (score ${signal.score}, ${signal.regime?.label})`, signal, { atr, regime: signal.regime?.name });
     }
   } catch (err) {

@@ -5,6 +5,7 @@ import './styles.css';
 import { AppProvider, useApp } from './lib/AppContext.jsx';
 import Layout from './components/Layout.jsx';
 import Dashboard from './pages/Dashboard.jsx';
+import Home from './pages/Home.jsx';
 import Terminal from './pages/Terminal.jsx';
 import Options from './pages/Options.jsx';
 import Scanner from './pages/Scanner.jsx';
@@ -33,7 +34,8 @@ function Gate() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={<Home />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/terminal" element={<Terminal />} />
         <Route path="/options" element={<Options />} />
         <Route path="/scanner" element={<Scanner />} />
@@ -53,7 +55,7 @@ function Gate() {
         <Route path="/copy" element={<Copy />} />
         <Route path="/marketplace" element={<Marketplace />} />
         <Route path="/api-docs" element={<ApiDocs />} />
-        <Route path="*" element={<Dashboard />} />
+        <Route path="*" element={<Home />} />
       </Route>
     </Routes>
   );
