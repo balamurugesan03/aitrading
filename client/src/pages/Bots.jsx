@@ -5,7 +5,7 @@ import { api } from '../lib/api.js';
 import { useApp } from '../lib/AppContext.jsx';
 import { usePoll, useServerEvents } from '../lib/hooks.js';
 import { CoinIcon, SignalBadge, GradeBadge, DecisionBadge, RegimeChip, Seg, Switch, Field, Spinner, Empty } from '../components/ui.jsx';
-import { fmtPrice, fmtMoney, fmtPct, fmtQty, ago, tone, baseOf, quoteOf, FX_PAIRS, INDEX_FUTURES, isCryptoSymbol } from '../lib/format.js';
+import { fmtPrice, fmtMoney, fmtPct, fmtQty, ago, tone, baseOf, quoteOf, FX_PAIRS, INDEX_FUTURES, isCryptoSymbol, fmtDuration, durationLeft, openNetPnl } from '../lib/format.js';
 
 const DEFAULTS = {
   // EMA Trend on 4h was the only strategy profitable on train, validation and out-of-sample data (2020-2026).
@@ -149,14 +149,14 @@ function BotForm({ initial, onClose, onSaved }) {
               <div className="row between card" style={{ padding: 12 }}>
                 <div>
                   <div className="row bold small" style={{ gap: 6 }}>Stop after one trade</div>
-                  <div className="tiny muted">When the bot's trade closes (take-profit, stop-loss, max hold time, candle close or manual close), the bot stops itself and does not open the next trade. Start it again for another trade.</div>
+                  <div className="tiny muted">When the bot's trade closes (take-profit, stop-loss, trade duration, candle close or manual close), the bot stops itself and does not open the next trade. Start it again for another trade.</div>
                 </div>
                 <Switch checked={Boolean(f.stopAfterTrade)} onChange={set('stopAfterTrade')} />
               </div>
               <div className="row between card" style={{ padding: 12, borderColor: f.onlyProfitExit ? 'rgba(245,165,36,0.6)' : undefined }}>
                 <div>
                   <div className="row bold small" style={{ gap: 6 }}>Close only in profit</div>
-                  <div className="tiny muted">The bot closes a trade automatically only when it is in profit (take-profit, or a trailing stop that has moved into profit). In a loss it keeps holding: no stop-loss, max hold time, candle-close or AI exit. Manual close still works.</div>
+                  <div className="tiny muted">The bot closes a trade automatically only when it is in profit (take-profit, or a trailing stop that has moved into profit). In a loss it keeps holding: no stop-loss, candle-close or AI exit. The max loss amount and the trade duration still close the trade. Manual close still works.</div>
                   {f.onlyProfitExit && <div className="tiny" style={{ marginTop: 4, color: 'var(--warn)' }}>No stop-loss: if the price keeps falling, the loss keeps growing and the money stays stuck in the trade.{f.exchange === 'bperp' ? ' With leverage the position can still be liquidated.' : ''}</div>}
                 </div>
                 <Switch checked={Boolean(f.onlyProfitExit)} onChange={set('onlyProfitExit')} />
@@ -167,7 +167,16 @@ function BotForm({ initial, onClose, onSaved }) {
                     <div className="row bold small" style={{ gap: 6 }}>Allow shorts (sell first)</div>
                     <div className="tiny muted">The bot may also sell first when the AI is bearish and history shows a positive edge for shorts. Off = long only. Not available for DCA and Grid.</div>
                   </div>
-                  <Switch checked={Boolean(f.allowShort)} onChange={set('allowShort')} />
+                  <Switch checked={Boolean(f.allowShort) || Boolean(f.alternate)} onChange={set('allowShort')} />
+                </div>
+              )}
+              {exInfo?.canShort && f.strategy !== 'grid' && (
+                <div className="row between card" style={{ padding: 12, borderColor: f.alternate ? 'rgba(47,140,255,0.6)' : undefined }}>
+                  <div>
+                    <div className="row bold small" style={{ gap: 6 }}>⇄ Alternate BUY / SELL</div>
+                    <div className="tiny muted">Strict sequence BUY → SELL → BUY → SELL. The next trade's direction comes only from the previous trade, never from the market trend; the AI analysis still picks the moment to enter (it waits for a setup in the required direction). TP, SL, trade duration and manual closes keep the sequence; switching this on starts it at BUY.{f.forceTrade ? ' With Trade every candle: a new trade every candle, always the opposite direction.' : ''}</div>
+                  </div>
+                  <Switch checked={Boolean(f.alternate)} onChange={set('alternate')} />
                 </div>
               )}
               <div className="divider" />
@@ -183,7 +192,10 @@ function BotForm({ initial, onClose, onSaved }) {
                 <Field label="Profit target (amount)" hint="Close at +N profit, e.g. 10 · 0 = off"><input className="input mono" type="number" min="0" step="0.1" value={f.takeProfitUsd ?? 0} onChange={set('takeProfitUsd')} /></Field>
                 <Field label="Max loss (amount)" hint="Close at -N loss, e.g. 5 · 0 = off"><input className="input mono" type="number" min="0" step="0.1" value={f.stopLossUsd ?? 0} onChange={set('stopLossUsd')} /></Field>
                 <Field label="Take profit %" hint="Sell at +N% profit · 0 = AI target"><input className="input mono" type="number" min="0" step="0.1" value={f.takeProfitPct ?? 0} onChange={set('takeProfitPct')} /></Field>
-                <Field label="Max hold time (min)" hint="Auto sell after N minutes · 0 = off"><input className="input mono" type="number" min="0" step="1" value={f.maxHoldMin ?? 0} onChange={set('maxHoldMin')} /></Field>
+                <Field label="Trade duration (min)" hint={Number(f.maxHoldMin) > 0 ? `Max holding time ${fmtDuration(Number(f.maxHoldMin))}: closed at expiry, profit or loss, unless TP / SL closed it first` : 'Max holding time · 0 = off (no time limit)'}>
+                  <input className="input mono" type="number" min="0" max="43200" step="1" value={f.maxHoldMin ?? 0} onChange={set('maxHoldMin')} />
+                  <Seg value={Number(f.maxHoldMin) || 0} onChange={(v) => set('maxHoldMin')(v)} options={[{ value: 0, label: 'Off' }, { value: 15, label: '15m' }, { value: 60, label: '1h' }, { value: 240, label: '4h' }, { value: 1440, label: '1d' }]} />
+                </Field>
               </div>
             </>
           )}
@@ -204,7 +216,7 @@ function BotForm({ initial, onClose, onSaved }) {
   );
 }
 
-function BotCard({ bot, price, onChange, onSelect, selected }) {
+function BotCard({ bot, price, live, onChange, onSelect, selected }) {
   const { toast } = useApp();
   const [busy, setBusy] = useState(false);
   const act = async (path, method = 'post') => {
@@ -221,8 +233,8 @@ function BotCard({ bot, price, onChange, onSelect, selected }) {
   const paused = bot.status === 'paused';
   const pos = bot.position;
   const short = pos?.side === 'short';
-  // Long: market value - cost. Short: sale proceeds - cost to buy back.
-  const upnl = pos && price ? (short ? pos.cost - price * pos.qty : price * pos.qty - pos.cost) : null;
+  // If closed now, after the exit fee: the same number take-profit / stop-loss trigger on.
+  const { pnl: upnl, pct: upct } = openNetPnl(pos, price, live);
   const winRate = bot.stats?.trades ? (bot.stats.wins / bot.stats.trades) * 100 : 0;
   const ls = bot.lastSignal;
 
@@ -242,6 +254,7 @@ function BotCard({ bot, price, onChange, onSelect, selected }) {
           {bot.allowShort && <span className="badge short">Shorts on</span>}
           {bot.onlyProfitExit && <span className="badge" style={{ color: 'var(--warn)' }} title="Closes automatically only in profit - no stop-loss">💰 Profit-only exit</span>}
           {bot.stopAfterTrade && <span className="badge" title="Stops after its trade closes">⏹ One trade</span>}
+          {bot.alternate && <span className="badge" title="Alternating BUY / SELL">⇄ Next: {pos ? (short ? 'BUY' : 'SELL') : bot.lastSide === 'long' ? 'SELL' : 'BUY'}</span>}
           {bot.forceTrade && <span className="badge" style={{ color: 'var(--warn)' }} title="Buys and sells every candle">⚡ Every {bot.interval}</span>}
           <span className={`badge ${bot.mode === 'live' ? 'down' : 'accent'}`}>{bot.mode.toUpperCase()}</span>
           <span className="row tiny" style={{ gap: 6 }}><span className={`dot ${running ? 'live' : paused ? 'bad' : 'off'}`} />{running ? 'Running' : paused ? 'Paused' : 'Stopped'}</span>
@@ -271,7 +284,7 @@ function BotCard({ bot, price, onChange, onSelect, selected }) {
         <div className="position-box">
           <div className="row between" style={{ marginBottom: 6 }}>
             <span className="bold">{short ? <span className="badge short" style={{ marginRight: 6 }}>SHORT</span> : null}Open position{pos.tranches ? ` · ${pos.tranches} DCA tranches` : ''}{pos.gridLots ? ` · ${pos.gridLots} grid lots` : ''}</span>
-            <span className={`mono bold ${tone(upnl)}`}>{fmtMoney(upnl, quoteOf(bot.symbol))} ({fmtPct((((price - pos.entry) / pos.entry) * 100) * (short ? -1 : 1))})</span>
+            <span className={`mono bold ${tone(upnl)}`} title="If closed now, after fees - take-profit / stop-loss trigger on this number">{upnl == null ? '…' : <>{fmtMoney(upnl, quoteOf(bot.symbol))} ({fmtPct(upct)}) <span className="tiny muted">after fees</span></>}</span>
           </div>
           <div className="kv">
             <span>Size</span><span>{fmtQty(pos.qty)} {baseOf(bot.symbol)}</span>
@@ -280,7 +293,7 @@ function BotCard({ bot, price, onChange, onSelect, selected }) {
             {bot.onlyProfitExit && !(bot.stopLossUsd > 0) && <><span>Stop-loss</span><span className="muted">Off at a loss (close only in profit)</span></>}
             {pos.stopLoss > 0 && <><span>Stop-loss {bot.trailingStop && '(trailing)'}</span><span className="down">{fmtPrice(pos.stopLoss)}</span></>}
             <span>Take-profit {bot.takeProfitUsd > 0 ? `(+${bot.takeProfitUsd})` : bot.takeProfitPct > 0 ? `(+${bot.takeProfitPct}%)` : '(AI target)'}</span><span className="up">{fmtPrice(pos.takeProfit)}</span>
-            {bot.maxHoldMin > 0 && pos.openedAt && <><span>Auto exit (max hold {bot.maxHoldMin} min)</span><span>{Math.max(0, Math.ceil((pos.openedAt + bot.maxHoldMin * 60000 - Date.now()) / 60000))} min left</span></>}
+            {bot.maxHoldMin > 0 && pos.openedAt && <><span>Trade duration ({fmtDuration(bot.maxHoldMin)})</span><span>{durationLeft(pos.openedAt, bot.maxHoldMin)} left</span></>}
             {pos.riskPct && <><span>Risk engine size</span><span>{pos.riskPct}% risk</span></>}
           </div>
         </div>
@@ -347,6 +360,7 @@ export default function Bots() {
   const [selected, setSelected] = useState(null);
   const [logs, , reloadLogs] = usePoll(`/logs?limit=150${selected ? `&botId=${selected}` : ''}`, 0, [selected]);
   const [prices, setPrices] = useState({});
+  const [lives, setLives] = useState({}); // botId -> net P&L from the server position guard
 
   const symbols = [...new Set((bots || []).map((b) => b.symbol))].join(',');
   const binanceSymbols = [...new Set((bots || []).filter((b) => (b.exchange || 'binance') === 'binance').map((b) => b.symbol))].join(',');
@@ -359,6 +373,7 @@ export default function Bots() {
     if (type === 'position') {
       const b = bots?.find((x) => x._id === p.botId);
       if (b) setPrices((s) => ({ ...s, [b.symbol]: p.price }));
+      if (p.live) setLives((s) => ({ ...s, [p.botId]: p.live }));
     }
   });
 
@@ -390,7 +405,7 @@ export default function Bots() {
       <div className="grid g-wide">
         <div className="grid g-2" style={{ alignContent: 'start' }}>
           {(bots || []).map((b) => (
-            <BotCard key={b._id} bot={b} price={priceOf(b.symbol)} selected={selected === b._id}
+            <BotCard key={b._id} bot={b} price={priceOf(b.symbol)} live={lives[b._id]} selected={selected === b._id}
               onSelect={() => setSelected(selected === b._id ? null : b._id)}
               onChange={(x) => (x === 'edit' ? setForm(b) : (reload(), reloadRisk()))} />
           ))}

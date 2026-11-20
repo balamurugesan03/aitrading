@@ -194,7 +194,19 @@ r.post('/strategies/benchmark', wrap(async (req, res) => {
 }));
 
 // ---------- Bots ----------
-const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage', 'maxHoldMin', 'forceTrade', 'stopAfterTrade', 'takeProfitPct', 'onlyProfitExit', 'tradeAmount', 'takeProfitUsd', 'stopLossUsd'];
+const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage', 'maxHoldMin', 'forceTrade', 'stopAfterTrade', 'takeProfitPct', 'onlyProfitExit', 'tradeAmount', 'takeProfitUsd', 'stopLossUsd', 'alternate'];
+// Alternating BUY/SELL needs an exchange that can sell first (shorts) and a long/short strategy (not DCA or Grid).
+// Switching it on starts a new sequence at BUY; the sequence then continues from the bot's own trades (lastSide).
+function applyAlternate(bot, patch) {
+  const next = { ...bot, ...patch };
+  if (!next.alternate) return patch;
+  const e = EXCHANGES[next.exchange || 'binance'];
+  if (!e?.canShort) throw bad(`Alternating BUY/SELL needs an exchange that can sell first: ${e?.name || next.exchange} cannot. Use Binance (USD-M futures), NSE futures or NSE forex.`);
+  if (['dca', 'grid'].includes(next.strategy)) throw bad('Alternating BUY/SELL works with long/short strategies, not DCA or Grid');
+  const out = { ...patch, allowShort: true };
+  if (!bot.alternate && !bot.position) Object.assign(out, { lastSide: null, tradeSeq: 0 });
+  return out;
+}
 const pickBot = (body, user) => {
   const out = {};
   BOT_FIELDS.forEach((k) => body[k] !== undefined && (out[k] = body[k]));
@@ -213,6 +225,7 @@ const pickBot = (body, user) => {
   if (out.forceTrade !== undefined) out.forceTrade = Boolean(out.forceTrade);
   if (out.stopAfterTrade !== undefined) out.stopAfterTrade = Boolean(out.stopAfterTrade);
   if (out.onlyProfitExit !== undefined) out.onlyProfitExit = Boolean(out.onlyProfitExit);
+  if (out.alternate !== undefined) out.alternate = Boolean(out.alternate);
   if (out.allowShort !== undefined) {
     out.allowShort = Boolean(out.allowShort);
     const exId = out.exchange || body.exchange || 'binance';
@@ -221,6 +234,8 @@ const pickBot = (body, user) => {
   ['threshold', 'riskPct', 'maxPositionPct', 'trailAtr', 'dailyLossLimitPct', 'maxHoldMin', 'takeProfitPct', 'tradeAmount', 'takeProfitUsd', 'stopLossUsd', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct'].forEach((k) => out[k] !== undefined && (out[k] = Number(out[k])));
   if (out.takeProfitPct !== undefined && !(out.takeProfitPct >= 0 && out.takeProfitPct <= 100)) throw bad('Take profit % must be 0-100 (0 = AI target)');
   for (const k of ['tradeAmount', 'takeProfitUsd', 'stopLossUsd']) if (out[k] !== undefined && !(out[k] >= 0)) throw bad(`${k} must be 0 or more (0 = off)`);
+  // Trade duration (maximum holding time) in whole minutes: 0 = off, up to 30 days.
+  if (out.maxHoldMin !== undefined && !(Number.isInteger(out.maxHoldMin) && out.maxHoldMin >= 0 && out.maxHoldMin <= 43200)) throw bad('Trade duration must be 0-43200 whole minutes (0 = off, 1440 = 1 day)');
   if (out.leverage !== undefined) {
     const lev = Number(out.leverage);
     if (!(lev >= 1 && lev <= PERP_MAX_LEVERAGE)) throw bad(`Leverage must be 1-${PERP_MAX_LEVERAGE}x`);
@@ -237,7 +252,7 @@ async function ownBot(req) {
 r.get('/bots', wrap(async (req, res) => res.json(await db.bots.find({ userId: uid(req) }, { sort: { createdAt: -1 } }))));
 
 r.post('/bots', wrap(async (req, res) => {
-  const data = { ...BOT_DEFAULTS, ...pickBot(req.body || {}, req.user) };
+  const data = applyAlternate({}, { ...BOT_DEFAULTS, ...pickBot(req.body || {}, req.user) });
   await assertBotSlot(req.user);
   if (data.mode === 'live') await assertFeature(req.user, 'liveTrading');
   if (!data.symbol) data.symbol = 'BTCUSDT';
@@ -258,7 +273,7 @@ r.post('/bots', wrap(async (req, res) => {
 
 r.patch('/bots/:id', wrap(async (req, res) => {
   const bot = await ownBot(req);
-  const patch = pickBot(req.body || {}, req.user);
+  const patch = applyAlternate(bot, pickBot(req.body || {}, req.user));
   if (patch.mode === 'live') await assertFeature(req.user, 'liveTrading');
   if (bot.position && (patch.symbol || patch.mode || patch.exchange || patch.strategy)) throw bad('Close the open position before changing symbol, mode, exchange or strategy');
   res.json(await db.bots.update(bot._id, patch));
@@ -323,7 +338,7 @@ r.get('/trades', wrap(async (req, res) => {
   const filter = { userId: uid(req) };
   if (req.query.mode) filter.mode = String(req.query.mode);
   if (req.query.botId) filter.botId = String(req.query.botId);
-  res.json(await db.trades.find(filter, { sort: { time: -1 }, limit: Math.min(1000, Number(req.query.limit || 200)) }));
+  res.json(await db.trades.find(filter, { sort: { time: -1 }, limit: Math.min(100000, Number(req.query.limit || 200)) })); // History asks for the full record
 }));
 
 r.post('/trade', wrap(async (req, res) => {

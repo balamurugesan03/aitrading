@@ -334,7 +334,7 @@ export default function HistoryPage() {
   const [result, setResult] = useState('all');
   const [shown, setShown] = useState(PAGE);
   const [open, setOpen] = useState(null);
-  const [trades] = usePoll(`/trades?limit=1000${mode !== 'all' ? `&mode=${mode}` : ''}`, 15000, [mode]);
+  const [trades] = usePoll(`/trades?limit=100000${mode !== 'all' ? `&mode=${mode}` : ''}`, 15000, [mode]);
   const [bots] = usePoll('/bots', 30000);
   const [journal] = usePoll('/journal?limit=500', 60000);
   const [insights] = usePoll('/journal/insights', 300000);

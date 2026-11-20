@@ -3,13 +3,14 @@ import { Activity } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { usePoll, useServerEvents } from '../lib/hooks.js';
 import { CoinIcon, Empty } from './ui.jsx';
-import { fmtMoney, fmtPct, fmtPrice, fmtQty, ago, tone, quoteOf } from '../lib/format.js';
+import { fmtMoney, fmtPct, fmtPrice, fmtQty, ago, tone, quoteOf, durationLeft, openNetPnl } from '../lib/format.js';
 
 // Every bot trade that is open right now (paper and live), with its live profit / loss.
 // Prices refresh every 5 s per exchange; positions refresh when a trade happens.
 export default function RunningTrades() {
   const [bots, , reload] = usePoll('/bots', 15000);
   const [prices, setPrices] = useState({});
+  const [lives, setLives] = useState({}); // botId -> net P&L from the server position guard (~2 s)
   const open = (bots || []).filter((b) => b.position?.qty > 0);
   const key = open.map((b) => `${b.exchange || 'binance'}:${b.symbol}`).sort().join(',');
 
@@ -33,6 +34,7 @@ export default function RunningTrades() {
     if (type === 'position' && p?.price) {
       const b = (bots || []).find((x) => x._id === p.botId);
       if (b) setPrices((s) => ({ ...s, [`${b.exchange || 'binance'}:${b.symbol}`]: p.price }));
+      if (p.live) setLives((s) => ({ ...s, [p.botId]: p.live }));
     }
   });
 
@@ -40,8 +42,9 @@ export default function RunningTrades() {
     const pos = b.position;
     const short = pos.side === 'short';
     const price = prices[`${b.exchange || 'binance'}:${b.symbol}`];
-    const pnl = price ? (short ? pos.cost - price * pos.qty : price * pos.qty - pos.cost) : null;
-    return { b, pos, short, price, pnl, pct: pnl != null && pos.cost ? (pnl / pos.cost) * 100 : null, ccy: quoteOf(b.symbol) };
+    // If closed now, after the exit fee: the same number take-profit / stop-loss trigger on.
+    const { pnl, pct } = openNetPnl(pos, price, lives[b._id]);
+    return { b, pos, short, price, pnl, pct, ccy: quoteOf(b.symbol) };
   });
   // Totals per mode and currency (USDT and INR are never added together).
   const totals = {};
@@ -69,7 +72,7 @@ export default function RunningTrades() {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr><th>Bot</th><th>Mode</th><th>Side</th><th>Entry</th><th>Now</th><th>Size</th><th>Profit / Loss</th><th>SL · TP</th><th>Open for</th></tr>
+              <tr><th>Bot</th><th>Mode</th><th>Side</th><th>Entry</th><th>Now</th><th>Size</th><th title="If closed now, after fees">Profit / Loss (after fees)</th><th>SL · TP</th><th>Open for</th></tr>
             </thead>
             <tbody>
               {rows.map(({ b, pos, short, price, pnl, pct, ccy }) => (
@@ -82,7 +85,7 @@ export default function RunningTrades() {
                   <td className="mono">{fmtQty(pos.qty)}</td>
                   <td className={`mono bold ${tone(pnl)}`}>{pnl == null ? '…' : <>{pnl >= 0 ? '+' : ''}{fmtMoney(pnl, ccy)} <span className="small">({fmtPct(pct)})</span></>}</td>
                   <td className="mono small"><span className="down">{pos.stopLoss > 0 ? fmtPrice(pos.stopLoss) : '—'}</span> · <span className="up">{fmtPrice(pos.takeProfit)}</span></td>
-                  <td className="small muted">{pos.openedAt ? ago(pos.openedAt) : '—'}{b.maxHoldMin > 0 && pos.openedAt ? <div className="tiny">auto exit in {Math.max(0, Math.ceil((pos.openedAt + b.maxHoldMin * 60000 - Date.now()) / 60000))} min</div> : null}</td>
+                  <td className="small muted">{pos.openedAt ? ago(pos.openedAt) : '—'}{b.maxHoldMin > 0 && pos.openedAt ? <div className="tiny">duration ends in {durationLeft(pos.openedAt, b.maxHoldMin)}</div> : null}</td>
                 </tr>
               ))}
             </tbody>

@@ -24,6 +24,29 @@ export const ago = (t) => {
   return `${Math.floor(s / 86400)}d ago`;
 };
 
+// P&L of an open bot position if it were closed now, AFTER the exit fee - the number take-profit / stop-loss
+// trigger on. `live` comes from the server's position guard (every ~2 s, exact fee and bid/ask); without a recent
+// one it is estimated from the last price with a 0.1% exit fee.
+export const openNetPnl = (pos, price, live) => {
+  if (live && Date.now() - (live.at || 0) < 15000) return { pnl: live.netPnl, pct: live.netPct, exact: true };
+  if (!pos || !price) return { pnl: null, pct: null };
+  const short = pos.side === 'short';
+  const fee = price * pos.qty * 0.001;
+  const pnl = short ? pos.cost - price * pos.qty - fee : price * pos.qty - fee - pos.cost;
+  return { pnl, pct: pos.cost ? (pnl / pos.cost) * 100 : null, exact: false };
+};
+
+// Trade duration (minutes) as text: 15 -> "15 min", 60 -> "1 h", 1440 -> "1 day".
+export const fmtDuration = (min) => {
+  const m = Math.max(0, Math.round(min));
+  if (m >= 1440 && m % 1440 === 0) return `${m / 1440} day${m === 1440 ? '' : 's'}`;
+  if (m >= 1440) return `${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
+  if (m >= 60) return `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
+  return `${m} min`;
+};
+// Time left until a trade's duration expires.
+export const durationLeft = (openedAt, maxHoldMin) => fmtDuration(Math.ceil((openedAt + maxHoldMin * 60000 - Date.now()) / 60000));
+
 export const tone = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : 'flat');
 
 // Crypto pairs (BTCUSDT), NSE forex pairs (USDINR -> USD / INR) and NSE stocks (RELIANCE, quoted in INR).
