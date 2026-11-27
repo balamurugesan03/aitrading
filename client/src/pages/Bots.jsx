@@ -11,13 +11,55 @@ const DEFAULTS = {
   // EMA Trend on 4h was the only strategy profitable on train, validation and out-of-sample data (2020-2026).
   name: '', autoStart: true, symbol: 'BTCUSDT', interval: '4h', strategy: 'ema_trend', mode: 'paper', useClaude: false,
   threshold: 30, riskPct: 1, maxPositionPct: 25, maxHoldMin: 0, forceTrade: false, stopAfterTrade: false, takeProfitPct: 0, onlyProfitExit: false, tradeAmount: 0, takeProfitUsd: 0, stopLossUsd: 0, trailingStop: true, trailAtr: 2.5, dailyLossLimitPct: 5,
-  dcaEvery: 24, dcaTranchePct: 5, dcaMaxTranches: 6, dcaTakeProfitPct: 4,
+  dcaEvery: 24, dcaTranchePct: 5, dcaMaxTranches: 6, dcaTakeProfitPct: 4, riskProfile: 'balanced',
 };
+
+// Auto mode risk levels (the server's bot/autoMode.js holds the actual settings).
+const AUTO_PAPER_TRADES = 10;
+const RISK_LEVELS = [
+  { id: 'safe', icon: '🟢', label: 'Safe', text: 'Small trades, few trades. Follows big trends on the 4h chart. Best for beginners.', facts: '4h chart · trades held up to 3 days · stops for the day after a 2% loss', smallProfit: '+0.5%' },
+  { id: 'balanced', icon: '🟡', label: 'Balanced', text: 'The AI picks the best strategy for the market every hour.', facts: '1h chart · trades held up to 1 day · stops for the day after a 4% loss', smallProfit: '+0.4%' },
+  { id: 'aggressive', icon: '🔴', label: 'Aggressive', text: 'More trades and bigger size. Can also sell first when the market falls (where the exchange allows it).', facts: '15m chart · trades held up to 4 hours · stops for the day after a 6% loss', smallProfit: '+0.3%' },
+];
+
+function AutoSettings({ f, set, initial, quote }) {
+  const paperDone = initial?._id && initial.mode === 'paper' ? initial.stats?.trades || 0 : 0;
+  const liveUnlocked = initial?.mode === 'live' || paperDone >= AUTO_PAPER_TRADES;
+  return (
+    <>
+      <Field label={`Amount per trade (${quote})`} hint="How much money each trade uses. 0 = the bot decides from your balance.">
+        <input className="input mono" type="number" min="0" step="1" value={f.tradeAmount ?? 0} onChange={set('tradeAmount')} />
+      </Field>
+      <Field label="Risk level">
+        <div className="col" style={{ gap: 8 }}>
+          {RISK_LEVELS.map((r) => (
+            <button key={r.id} type="button" className="card" onClick={() => set('riskProfile')(r.id)}
+              style={{ padding: 12, textAlign: 'left', cursor: 'pointer', borderColor: f.riskProfile === r.id ? 'var(--accent)' : undefined, borderWidth: f.riskProfile === r.id ? 2 : undefined }}>
+              <div className="bold small">{r.icon} {r.label}{r.id === 'safe' ? <span className="tiny muted"> · recommended to start</span> : null}</div>
+              <div className="tiny muted">{r.text}</div>
+              <div className="tiny dim" style={{ marginTop: 2 }}>{r.facts}</div>
+            </button>
+          ))}
+        </div>
+      </Field>
+      <div className="alert info small">
+        🤖 <b>The bot sets everything else by itself</b>: timeframe, strategy, stop-loss, profit target and trade size.
+        Every candle it reads the market: no new trades when the market is crashing or falling, smaller trades when prices jump a lot.
+        Every trade always has a stop-loss and a time limit, so it never gets stuck.
+        It sells at the target price, and also takes a small profit (after fees) as soon as one is there: {RISK_LEVELS.find((r) => r.id === f.riskProfile)?.smallProfit}.
+      </div>
+      {liveUnlocked
+        ? <Field label="Mode"><Seg className="mode" value={f.mode} onChange={set('mode')} options={[{ value: 'paper', label: 'Paper' }, { value: 'live', label: 'Live' }]} /></Field>
+        : <div className="alert small">📝 Auto bots start with <b>Paper money</b> (no real money). Live trading unlocks after {AUTO_PAPER_TRADES} closed paper trades{initial?._id ? ` (done: ${paperDone})` : ''}.</div>}
+    </>
+  );
+}
 
 function BotForm({ initial, onClose, onSaved }) {
   const { status, toast, exchange } = useApp();
   const [lib] = usePoll('/strategies');
-  const [f, setF] = useState({ ...DEFAULTS, exchange, ...initial });
+  // New bots start in Auto mode; existing bots keep the mode they were created with.
+  const [f, setF] = useState(() => ({ ...DEFAULTS, exchange, ...initial, autoMode: initial?._id ? Boolean(initial.autoMode) : initial?.autoMode ?? true }));
   const exInfo = (status?.exchanges || []).find((e) => e.id === f.exchange);
   const [busy, setBusy] = useState(false);
   const set = (k) => (v) => setF((s) => ({ ...s, [k]: v?.target ? v.target.value : v }));
@@ -70,6 +112,9 @@ function BotForm({ initial, onClose, onSaved }) {
           <button className="btn ghost icon-btn" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="col" style={{ gap: 14 }}>
+          <Field label="Setup" hint={f.autoMode ? 'Auto: pick a coin, an amount and a risk level. The bot handles the rest.' : 'Manual: every setting is yours to set. For experienced traders.'}>
+            <Seg value={f.autoMode ? 'auto' : 'manual'} onChange={(v) => set('autoMode')(v === 'auto')} options={[{ value: 'auto', label: '🤖 Auto (easy)' }, { value: 'manual', label: '⚙️ Manual (advanced)' }]} />
+          </Field>
           <div className="grid g-2" style={{ gap: 12 }}>
             <Field label="Bot name"><input className="input" value={f.name} onChange={set('name')} placeholder="Auto-named if empty" /></Field>
             <Field label="Trading pair">{fx
@@ -102,16 +147,19 @@ function BotForm({ initial, onClose, onSaved }) {
                   })()
                   : <input className="input mono" value={f.symbol} onChange={set('symbol')} placeholder={stocks ? 'RELIANCE' : 'BTCUSDT'} />}</Field>
           </div>
-          <Field label="AI strategy" hint={strat ? `${strat.description}${strat.timeframes?.length ? ` Best on ${strat.timeframes.join(', ')}.` : ''}` : ''}>
-            <select className="select" value={f.strategy} onChange={set('strategy')}>
-              {(lib?.strategies || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-          </Field>
+          {!f.autoMode && (
+            <Field label="AI strategy" hint={strat ? `${strat.description}${strat.timeframes?.length ? ` Best on ${strat.timeframes.join(', ')}.` : ''}` : ''}>
+              <select className="select" value={f.strategy} onChange={set('strategy')}>
+                {(lib?.strategies || []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </Field>
+          )}
           <Field label={`Exchange · ${perps || futures ? 'FUTURES' : fx ? 'FOREX' : stocks ? 'STOCKS' : 'SPOT'}`} hint={exInfo && !exInfo.trading ? `${exInfo.name}: paper trading only (live trading not supported yet)` : 'Live trading uses the API keys you connected for this exchange'}>
             <select className="select" value={f.exchange} onChange={set('exchange')}>
               {(status?.exchanges || []).map((e) => <option key={e.id} value={e.id}>{e.name}{e.trading ? '' : ' (paper only)'}</option>)}
             </select>
           </Field>
+          {f.autoMode ? <AutoSettings f={f} set={set} initial={initial} quote={exInfo?.currency || 'USDT'} /> : (<>
           <div className="grid g-2" style={{ gap: 12 }}>
             <Field label="Timeframe"><Seg value={f.interval} onChange={set('interval')} options={['1m', '5m', '15m', '1h', '4h'].filter((i) => !exInfo || exInfo.intervals.includes(i))} /></Field>
             <Field label="Mode"><Seg className="mode" value={f.mode} onChange={set('mode')} options={[{ value: 'paper', label: 'Paper' }, { value: 'live', label: 'Live' }]} /></Field>
@@ -192,6 +240,7 @@ function BotForm({ initial, onClose, onSaved }) {
                 <Field label="Profit target (amount)" hint="Close at +N profit, e.g. 10 · 0 = off"><input className="input mono" type="number" min="0" step="0.1" value={f.takeProfitUsd ?? 0} onChange={set('takeProfitUsd')} /></Field>
                 <Field label="Max loss (amount)" hint="Close at -N loss, e.g. 5 · 0 = off"><input className="input mono" type="number" min="0" step="0.1" value={f.stopLossUsd ?? 0} onChange={set('stopLossUsd')} /></Field>
                 <Field label="Take profit %" hint="Sell at +N% profit · 0 = AI target"><input className="input mono" type="number" min="0" step="0.1" value={f.takeProfitPct ?? 0} onChange={set('takeProfitPct')} /></Field>
+                <Field label="Small profit exit %" hint="Close as soon as the trade is +N% in profit after fees, even before the target · 0 = off"><input className="input mono" type="number" min="0" step="0.1" value={f.smallProfitPct ?? 0} onChange={set('smallProfitPct')} /></Field>
                 <Field label="Trade duration (min)" hint={Number(f.maxHoldMin) > 0 ? `Max holding time ${fmtDuration(Number(f.maxHoldMin))}: closed at expiry, profit or loss, unless TP / SL closed it first` : 'Max holding time · 0 = off (no time limit)'}>
                   <input className="input mono" type="number" min="0" max="43200" step="1" value={f.maxHoldMin ?? 0} onChange={set('maxHoldMin')} />
                   <Seg value={Number(f.maxHoldMin) || 0} onChange={(v) => set('maxHoldMin')(v)} options={[{ value: 0, label: 'Off' }, { value: 15, label: '15m' }, { value: 60, label: '1h' }, { value: 240, label: '4h' }, { value: 1440, label: '1d' }]} />
@@ -199,6 +248,7 @@ function BotForm({ initial, onClose, onSaved }) {
               </div>
             </>
           )}
+          </>)}
           {!initial?._id && (
             <div className="row between card" style={{ padding: 12 }}>
               <div>
@@ -249,6 +299,7 @@ function BotCard({ bot, price, live, onChange, onSelect, selected }) {
           </div>
         </div>
         <div className="row" style={{ gap: 6 }}>
+          {bot.autoMode && <span className="badge accent" title="Auto mode: the bot sets its own settings and adapts to the market">🤖 Auto · {RISK_LEVELS.find((r) => r.id === bot.riskProfile)?.label || 'Balanced'}</span>}
           {bot.copyable && <span className="badge accent" title="Shared on the copy-trading leaderboard">Shared</span>}
           {bot.useClaude && <span className="badge ai"><Sparkles size={11} /> Claude</span>}
           {bot.allowShort && <span className="badge short">Shorts on</span>}
@@ -261,6 +312,9 @@ function BotCard({ bot, price, live, onChange, onSelect, selected }) {
         </div>
       </div>
       {paused && <div className="alert warn small"><PauseCircle size={14} /> {bot.pausedReason}</div>}
+      {bot.autoMode && running && bot.autoStatus?.note && (
+        <div className={`alert small ${bot.autoStatus.blocked ? 'warn' : 'info'}`}>🤖 {bot.autoStatus.note}{bot.autoStatus.sizeMult > 0 && bot.autoStatus.sizeMult < 1 ? ` (size x${bot.autoStatus.sizeMult})` : ''} <span className="dim tiny">{ago(bot.autoStatus.time)}</span></div>
+      )}
 
       <div className="bot-metrics">
         <div><small>Total PnL</small><b className={tone(bot.stats?.pnl)}>{fmtMoney(bot.stats?.pnl || 0, quoteOf(bot.symbol))}</b></div>
@@ -293,6 +347,7 @@ function BotCard({ bot, price, live, onChange, onSelect, selected }) {
             {bot.onlyProfitExit && !(bot.stopLossUsd > 0) && <><span>Stop-loss</span><span className="muted">Off at a loss (close only in profit)</span></>}
             {pos.stopLoss > 0 && <><span>Stop-loss {bot.trailingStop && '(trailing)'}</span><span className="down">{fmtPrice(pos.stopLoss)}</span></>}
             <span>Take-profit {bot.takeProfitUsd > 0 ? `(+${bot.takeProfitUsd})` : bot.takeProfitPct > 0 ? `(+${bot.takeProfitPct}%)` : '(AI target)'}</span><span className="up">{fmtPrice(pos.takeProfit)}</span>
+            {bot.smallProfitPct > 0 && <><span>Small profit exit</span><span className="up">closes at +{bot.smallProfitPct}% after fees</span></>}
             {bot.maxHoldMin > 0 && pos.openedAt && <><span>Trade duration ({fmtDuration(bot.maxHoldMin)})</span><span>{durationLeft(pos.openedAt, bot.maxHoldMin)} left</span></>}
             {pos.riskPct && <><span>Risk engine size</span><span>{pos.riskPct}% risk</span></>}
           </div>

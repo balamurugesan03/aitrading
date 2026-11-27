@@ -11,6 +11,8 @@ const LATENCY_MS = [80, 350];
 const BOOK_DEPTH = 100;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A closing order found nothing left in the paper wallet to sell / cover (sold manually, wallet reset, another bot).
+const noPosition = (msg) => Object.assign(new Error(msg), { code: 'NO_POSITION' });
 
 const WALLETS = {
   crypto: { kind: 'paper', quote: 'USDT', start: () => config.paperStartBalance },
@@ -108,7 +110,7 @@ export async function paperOrder({ userId, exchange = 'binance', side, symbol, b
   }
 
   const qty = Math.min(quantity, b[base] || 0);
-  if (qty <= 0) throw new Error(`Insufficient ${base} balance`);
+  if (qty <= 0) throw noPosition(`Insufficient ${base} balance`);
   const walk = walkBook(book.bids, 'SELL', qty);
   if (walk.filledQty <= 0) throw new Error('Order rejected: no liquidity');
   const fee = walk.cost * FEE;
@@ -138,14 +140,14 @@ async function lotOrder({ adapter, w, b, book, mid, side, base, quote, quoteAmou
     if (units < lot) throw new Error(`Short is smaller than 1 lot (${lot} units) or the ${quote} balance is too low`);
   } else if (short && side === 'BUY') {
     units = Math.floor(Math.min(quantity, shortHeld) / lot + 1e-9) * lot;
-    if (units < lot) throw new Error(`No ${base} short position to cover`);
+    if (units < lot) throw noPosition(`No ${base} short position to cover`);
   } else if (side === 'BUY') {
     const spend = Math.min(quoteAmount, b[quote] || 0);
     units = Math.floor(spend / (levels[0][0] * lot * (1 + feeRate) * 1.001)) * lot;
     if (units < lot) throw new Error(lot === 1 ? `Amount is below the price of one share (${quote} ${levels[0][0]}) or the ${quote} balance is too low` : `Order is smaller than 1 lot (${lot} units, about ${quote} ${Math.round(levels[0][0] * lot).toLocaleString('en-IN')}) or the ${quote} balance is too low`);
   } else {
     units = Math.floor(Math.min(quantity, b[base] || 0) / lot + 1e-9) * lot;
-    if (units < lot) throw new Error(`Insufficient ${base} ${lot === 1 ? 'shares' : 'position'}`);
+    if (units < lot) throw noPosition(`Insufficient ${base} ${lot === 1 ? 'shares' : 'position'}`);
   }
   const walk = walkBook(levels, 'SELL', units); // quantity-based walk for both sides
   let gross = walk.cost;
@@ -203,7 +205,7 @@ async function marginOrder({ adapter, w, b, book, mid, side, symbol, base, quote
   } else {
     have = short ? Math.max(0, -held) : Math.max(0, held);
     units = Math.floor(Math.min(quantity, have) / lot + 1e-9) * lot;
-    if (units < lot) throw new Error(`No ${base} ${short ? 'short' : 'long'} futures position to ${short ? 'cover' : 'sell'}`);
+    if (units < lot) throw noPosition(`No ${base} ${short ? 'short' : 'long'} futures position to ${short ? 'cover' : 'sell'}`);
   }
   const walk = walkBook(levels, 'SELL', units); // quantity-based walk for both sides
   let gross = walk.cost;
@@ -287,7 +289,7 @@ async function perpOrder({ adapter, w, b, book, mid, side, symbol, base, quote, 
   }
   const have = short ? Math.max(0, -held) : Math.max(0, held);
   qty = quantity >= have * 0.999 ? have : floorStep(Math.min(quantity, have), info.stepSize); // a full close takes the dust too
-  if (!(qty > 0)) throw new Error(`No ${base} ${short ? 'short' : 'long'} futures position to ${short ? 'cover' : 'sell'}`);
+  if (!(qty > 0)) throw noPosition(`No ${base} ${short ? 'short' : 'long'} futures position to ${short ? 'cover' : 'sell'}`);
   const fill = fillQty(levels, qty, side);
   const fee = fill.gross * feeRate;
   closePerpBooks({ b, margin, perps, base, quote, qty, have, side, gross: fill.gross, fee });

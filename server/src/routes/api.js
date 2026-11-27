@@ -21,6 +21,7 @@ import { journalInsights } from '../ai/journal.js';
 import { trainCandidate, evaluateModel, promoteModel, learningReport, evaluatePendingSignals } from '../ai/modelRegistry.js';
 import { activeParams } from '../ai/mlModel.js';
 import { baseAsset } from '../ai/util.js';
+import { RISK_PROFILES, AUTO_PAPER_TRADES, autoBotConfig } from '../bot/autoMode.js';
 import { BOT_DEFAULTS, startBot, stopBot, closeBotPosition, executeOrder, killSwitch, resumeTrading } from '../bot/engine.js';
 import { evaluateRisk, accountState } from '../bot/riskEngine.js';
 import { getSettings, updateSettings, health } from '../bot/safety.js';
@@ -194,7 +195,7 @@ r.post('/strategies/benchmark', wrap(async (req, res) => {
 }));
 
 // ---------- Bots ----------
-const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage', 'maxHoldMin', 'forceTrade', 'stopAfterTrade', 'takeProfitPct', 'onlyProfitExit', 'tradeAmount', 'takeProfitUsd', 'stopLossUsd', 'alternate'];
+const BOT_FIELDS = ['name', 'exchange', 'symbol', 'interval', 'strategy', 'mode', 'useClaude', 'allowShort', 'threshold', 'riskPct', 'maxPositionPct', 'trailingStop', 'trailAtr', 'dailyLossLimitPct', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct', 'leverage', 'maxHoldMin', 'forceTrade', 'stopAfterTrade', 'takeProfitPct', 'onlyProfitExit', 'tradeAmount', 'takeProfitUsd', 'stopLossUsd', 'alternate', 'autoMode', 'riskProfile', 'smallProfitPct'];
 // Alternating BUY/SELL needs an exchange that can sell first (shorts) and a long/short strategy (not DCA or Grid).
 // Switching it on starts a new sequence at BUY; the sequence then continues from the bot's own trades (lastSide).
 function applyAlternate(bot, patch) {
@@ -226,13 +227,16 @@ const pickBot = (body, user) => {
   if (out.stopAfterTrade !== undefined) out.stopAfterTrade = Boolean(out.stopAfterTrade);
   if (out.onlyProfitExit !== undefined) out.onlyProfitExit = Boolean(out.onlyProfitExit);
   if (out.alternate !== undefined) out.alternate = Boolean(out.alternate);
+  if (out.autoMode !== undefined) out.autoMode = Boolean(out.autoMode);
+  if (out.riskProfile !== undefined && !RISK_PROFILES[out.riskProfile]) throw bad('Risk level must be safe, balanced or aggressive');
   if (out.allowShort !== undefined) {
     out.allowShort = Boolean(out.allowShort);
     const exId = out.exchange || body.exchange || 'binance';
     if (out.allowShort && !EXCHANGES[exId]?.canShort) throw bad(`${EXCHANGES[exId]?.name || exId} cannot be sold short - shorts are available on NSE forex and NSE futures`);
   }
-  ['threshold', 'riskPct', 'maxPositionPct', 'trailAtr', 'dailyLossLimitPct', 'maxHoldMin', 'takeProfitPct', 'tradeAmount', 'takeProfitUsd', 'stopLossUsd', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct'].forEach((k) => out[k] !== undefined && (out[k] = Number(out[k])));
+  ['threshold', 'riskPct', 'maxPositionPct', 'trailAtr', 'dailyLossLimitPct', 'maxHoldMin', 'takeProfitPct', 'smallProfitPct', 'tradeAmount', 'takeProfitUsd', 'stopLossUsd', 'dcaEvery', 'dcaTranchePct', 'dcaMaxTranches', 'dcaTakeProfitPct'].forEach((k) => out[k] !== undefined && (out[k] = Number(out[k])));
   if (out.takeProfitPct !== undefined && !(out.takeProfitPct >= 0 && out.takeProfitPct <= 100)) throw bad('Take profit % must be 0-100 (0 = AI target)');
+  if (out.smallProfitPct !== undefined && !(out.smallProfitPct >= 0 && out.smallProfitPct <= 100)) throw bad('Small profit exit % must be 0-100 (0 = off)');
   for (const k of ['tradeAmount', 'takeProfitUsd', 'stopLossUsd']) if (out[k] !== undefined && !(out[k] >= 0)) throw bad(`${k} must be 0 or more (0 = off)`);
   // Trade duration (maximum holding time) in whole minutes: 0 = off, up to 30 days.
   if (out.maxHoldMin !== undefined && !(Number.isInteger(out.maxHoldMin) && out.maxHoldMin >= 0 && out.maxHoldMin <= 43200)) throw bad('Trade duration must be 0-43200 whole minutes (0 = off, 1440 = 1 day)');
@@ -243,6 +247,19 @@ const pickBot = (body, user) => {
   }
   return out;
 };
+// Auto mode: the risk profile decides every advanced setting (anything else the client sent is ignored), and an auto
+// bot trades on paper until it has closed AUTO_PAPER_TRADES trades.
+function applyAuto(bot, patch) {
+  const next = { ...bot, ...patch };
+  if (!next.autoMode) return patch;
+  const out = { ...patch, ...autoBotConfig(next.riskProfile, EXCHANGES[next.exchange || 'binance']) };
+  // Keep the timeframe and strategy of a bot with an open trade: its stop and target were set with them.
+  if (bot.position) Object.assign(out, { interval: bot.interval, strategy: bot.strategy });
+  if (next.mode === 'live' && bot.mode !== 'live' && (bot.mode !== 'paper' || (bot.stats?.trades || 0) < AUTO_PAPER_TRADES)) {
+    throw bad(`Auto bots trade on Paper first: live trading unlocks after ${AUTO_PAPER_TRADES} closed paper trades (this bot has ${bot.stats?.trades || 0})`);
+  }
+  return out;
+}
 async function ownBot(req) {
   const bot = await db.bots.findOne({ _id: req.params.id });
   if (!bot || bot.userId !== uid(req)) throw bad('Bot not found', 404);
@@ -252,7 +269,7 @@ async function ownBot(req) {
 r.get('/bots', wrap(async (req, res) => res.json(await db.bots.find({ userId: uid(req) }, { sort: { createdAt: -1 } }))));
 
 r.post('/bots', wrap(async (req, res) => {
-  const data = applyAlternate({}, { ...BOT_DEFAULTS, ...pickBot(req.body || {}, req.user) });
+  const data = applyAuto({}, applyAlternate({}, { ...BOT_DEFAULTS, ...pickBot(req.body || {}, req.user) }));
   await assertBotSlot(req.user);
   if (data.mode === 'live') await assertFeature(req.user, 'liveTrading');
   if (!data.symbol) data.symbol = 'BTCUSDT';
@@ -273,9 +290,9 @@ r.post('/bots', wrap(async (req, res) => {
 
 r.patch('/bots/:id', wrap(async (req, res) => {
   const bot = await ownBot(req);
-  const patch = applyAlternate(bot, pickBot(req.body || {}, req.user));
+  const patch = applyAuto(bot, applyAlternate(bot, pickBot(req.body || {}, req.user)));
   if (patch.mode === 'live') await assertFeature(req.user, 'liveTrading');
-  if (bot.position && (patch.symbol || patch.mode || patch.exchange || patch.strategy)) throw bad('Close the open position before changing symbol, mode, exchange or strategy');
+  if (bot.position && ['symbol', 'mode', 'exchange', 'strategy'].some((k) => patch[k] !== undefined && patch[k] !== bot[k])) throw bad('Close the open position before changing symbol, mode, exchange or strategy');
   res.json(await db.bots.update(bot._id, patch));
 }));
 

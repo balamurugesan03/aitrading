@@ -17,6 +17,7 @@ import { evaluateRisk } from './riskEngine.js';
 import { buildGrid, gridActions, GRID_REGIMES, GRID_KILL_REGIMES } from './grid.js';
 import { getSettings, updateSettings, health, abnormalPrice, staleData, orderCooldown, markOrder } from './safety.js';
 import { notify } from '../notify.js';
+import { autoTune } from './autoMode.js';
 
 export const events = new EventEmitter();
 const TICK_MS = 5000; // candle loop: AI analysis once per closed candle, entries
@@ -74,6 +75,9 @@ export const BOT_DEFAULTS = {
   takeProfitUsd: 0, // 0 = off; otherwise close once the trade's profit reaches this amount (quote currency)
   stopLossUsd: 0, // 0 = off; otherwise close once the trade's loss reaches this amount - always, even with onlyProfitExit
   alternate: false, // true = strict BUY -> SELL -> BUY ... : the next trade's direction comes from the previous trade (shorting exchanges only)
+  smallProfitPct: 0, // 0 = off; otherwise close once the trade is this many % in profit AFTER fees, even before the target
+  autoMode: false, // true = beginner Auto mode: the risk profile sets everything and the bot adapts to the market (bot/autoMode.js)
+  riskProfile: 'balanced', // Auto mode risk level: safe | balanced | aggressive
   onlyProfitExit: false, // true = automatic exits only in profit: no stop-loss, candle-close or AI exit at a loss (max loss amount and trade duration still close)
 };
 
@@ -214,7 +218,7 @@ async function openPositionNow(bot, user, signal, sizing, candles, candleTime) {
   markOrder(key);
   const short = signal.signal === 'SHORT';
   const { fill, info } = await executeOrder({
-    user, bot, mode: bot.mode, exchange: bot.exchange, symbol: bot.symbol, side: short ? 'SELL' : 'BUY', quoteAmount: Number(bot.tradeAmount) > 0 ? Number(bot.tradeAmount) : sizing.notional, short, leverage: bot.leverage,
+    user, bot, mode: bot.mode, exchange: bot.exchange, symbol: bot.symbol, side: short ? 'SELL' : 'BUY', quoteAmount: Number(bot.tradeAmount) > 0 ? Number(bot.tradeAmount) * (bot.autoMode ? sizing.sizeMult ?? 1 : 1) : sizing.notional, short, leverage: bot.leverage,
     reason: `${signal.signal} p=${(signal.probability * 100).toFixed(0)}% ${signal.quality} (${signal.strategyName})`, signal,
     clientOrderId: `nx${bot._id.slice(0, 8)}${candleTime}${short ? 'X' : 'B'}`,
   });
@@ -406,12 +410,17 @@ async function closePositionNow(bot, user, price, reason, signal, exitCtx = {}) 
   markOrder(key);
   const fills = (bot.mode === 'live'
     ? await (short ? liveCover : liveSell)(bot, user, pos, reason, signal)
-    : [await executeOrder({ user, bot, mode: bot.mode, exchange: bot.exchange, symbol: bot.symbol, side: short ? 'BUY' : 'SELL', quantity: pos.qty, short, reason, signal, clientOrderId: `nx${bot._id.slice(0, 8)}${Date.now()}${short ? 'C' : 'S'}` })]
+    : await executeOrder({ user, bot, mode: bot.mode, exchange: bot.exchange, symbol: bot.symbol, side: short ? 'BUY' : 'SELL', quantity: pos.qty, short, reason, signal, clientOrderId: `nx${bot._id.slice(0, 8)}${Date.now()}${short ? 'C' : 'S'}` })
+      .then((r) => [r])
+      // Paper wallet no longer holds this position (sold manually, wallet reset, another bot on the same coin):
+      // without this the close failed on every guard pass and the bot held the trade forever, never selling.
+      .catch((err) => { if (err.code === 'NO_POSITION') return []; throw err; })
   ).filter((f) => f.fill?.qty > 0);
   if (!fills.length) {
     await db.bots.update(bot._id, { position: null, lastSide: pos.side || 'long' });
-    await log(bot, 'warn', `Position closed in the bot only: there was no ${bot.symbol} left on the exchange to sell (${reason}). It was sold or moved outside the bot.`);
-    notify(user._id, { type: 'warn', title: `${bot.name}: position not found on the exchange`, body: 'Closed in the bot without a trade - check your exchange account', important: true });
+    const where = bot.mode === 'live' ? 'on the exchange' : 'in the paper wallet';
+    await log(bot, 'warn', `Position closed in the bot only: there was no ${bot.symbol} left ${where} to sell (${reason}). It was sold or moved outside the bot.`);
+    notify(user._id, { type: 'warn', title: `${bot.name}: position not found ${where}`, body: `Closed in the bot without a trade - check your ${bot.mode === 'live' ? 'exchange account' : 'paper wallet'}`, important: true });
     return;
   }
   let pnl = 0;
@@ -671,6 +680,10 @@ function exitDue(bot, px) {
   // 1. Take profit: the fixed amount (net, after the exit fee), else the price target (% or the AI's ATR target).
   if (tpUsd > 0 && net >= tpUsd) return `Profit target +${tpUsd} reached (net ${signed(net)})`;
   if (pos.takeProfit > 0 && (short ? px <= pos.takeProfit : px >= pos.takeProfit)) return 'Take-profit hit';
+  // Small profit exit: close as soon as the trade is this many % in profit net of fees, even before the target.
+  const smallPct = Number(bot.smallProfitPct) || 0;
+  const netPct = pos.cost ? (net / pos.cost) * 100 : 0;
+  if (smallPct > 0 && net > 0 && netPct >= smallPct) return `Small profit taken (net ${signed(net)}, ${signed(netPct)}% after fees)`;
   // 2. Stop loss: the fixed max loss always applies (even with "Close only in profit"); the price / trailing stop
   // respects "Close only in profit".
   if (slUsd > 0 && net <= -slUsd) return `Max loss ${slUsd} reached (net ${signed(net)})`;
@@ -871,7 +884,12 @@ async function tick(botId) {
 
     let risk = null;
     const wrongSide = alt && (signal.signal === 'LONG' || signal.signal === 'SHORT') && signal.signal !== needSide;
-    if ((signal.signal === 'LONG' || signal.signal === 'SHORT') && !bot.position && bot.strategy !== 'dca' && !wrongSide) risk = await evaluateRisk(signal, { user, bot, mode: bot.mode, exchange: bot.exchange });
+    // Auto mode: adapt to the market regime - no new trades in a crash, smaller trades when volatile or sideways.
+    const tune = bot.autoMode ? autoTune(bot, signal.regime?.name) : null;
+    const entrySignal = signal.signal === 'LONG' || signal.signal === 'SHORT';
+    const autoBlocked = Boolean(tune && entrySignal && (tune.blockEntry || (signal.signal === 'SHORT' && !bot.allowShort)));
+    const riskBot = tune ? { ...bot, riskPct: +(bot.riskPct * tune.sizeMult).toFixed(3) } : bot;
+    if (entrySignal && !bot.position && bot.strategy !== 'dca' && !wrongSide && !autoBlocked) risk = await evaluateRisk(signal, { user, bot: riskBot, mode: bot.mode, exchange: bot.exchange });
     const saved = await db.signals.insert({
       userId: bot.userId, botId, exchange: bot.exchange, symbol: bot.symbol, interval: bot.interval, time: signal.time, price, signal: signal.signal, score: signal.score,
       probability: signal.probability, expectedReturnPct: signal.expectedReturnPct, rr: signal.rr, quality: signal.quality,
@@ -880,8 +898,12 @@ async function tick(botId) {
     });
     await db.bots.update(bot._id, {
       lastCandleTime: lastClosed.time,
-      lastSignal: { signal: signal.signal, action: signal.action, score: signal.score, probability: signal.probability, quality: signal.quality, regime: signal.regime?.label, strategy: signal.strategyName, decision: risk?.decision, rejectedBy: risk?.rejectedBy || [], time: signal.time, claude: signal.claude?.decision?.reasoning },
+      lastSignal: { signal: signal.signal, action: signal.action, score: signal.score, probability: signal.probability, quality: signal.quality, regime: signal.regime?.label, strategy: signal.strategyName, decision: risk?.decision, rejectedBy: autoBlocked && !bot.position ? ['Auto mode: market not safe'] : risk?.rejectedBy || [], time: signal.time, claude: signal.claude?.decision?.reasoning },
+      ...(tune && { autoStatus: { regime: signal.regime?.name, note: tune.note, sizeMult: tune.sizeMult, blocked: tune.blockEntry, time: Date.now() } }),
     });
+    if (tune && (autoBlocked || bot.autoStatus?.regime !== signal.regime?.name)) {
+      await log(bot, 'info', `${modeTag(bot)} Auto mode: ${tune.note}${tune.sizeMult > 0 && tune.sizeMult < 1 ? ` (trade size x${tune.sizeMult})` : ''}`);
+    }
     events.emit('signal', saved);
     errorCount.set(botId, 0);
     await log(bot, 'info', `${signal.signal} | ${signal.regime?.label} -> ${signal.strategyName} | score ${signal.score} | p=${(signal.probability * 100).toFixed(0)}% | E[r] ${signal.expectedReturnPct}% | R:R ${signal.rr} | ${signal.quality}${risk ? ` | ${risk.decision}${risk.rejectedBy.length ? ` (${risk.rejectedBy.join(', ')})` : ''}` : ''}`);
@@ -921,7 +943,7 @@ async function tick(botId) {
       await log(bot, 'info', `${modeTag(bot)} Alternating BUY/SELL: next trade must be ${sideWord(needSide)} (previous ${bot.lastSide ? sideWord(bot.lastSide) : 'none - first trade'}) - ${wrongSide ? `the analysis says ${sideWord(signal.signal)}, so no trade; waiting for a ${sideWord(needSide)} setup` : `waiting for an approved ${sideWord(needSide)} setup`}`);
     }
     if (risk?.approved) {
-      await openPosition(bot, user, signal, { notional: risk.position.notional, riskPct: risk.finalRiskPct, equity: risk.account.equity }, closed, lastClosed.time);
+      await openPosition(bot, user, signal, { notional: risk.position.notional, riskPct: risk.finalRiskPct, equity: risk.account.equity, sizeMult: tune?.sizeMult }, closed, lastClosed.time);
     } else if (signal.signal === 'EXIT' && bot.position && !holdAtLoss(bot, price)) {
       await closePosition(bot, user, price, `AI exit (score ${signal.score}, ${signal.regime?.label})`, signal, { atr, regime: signal.regime?.name });
     }
