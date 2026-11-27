@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { api, getToken } from './api.js';
+import { api, authEvents, getToken } from './api.js';
 
 // Polls an API endpoint. Returns [data, error, reload].
 export function usePoll(url, ms = 0, deps = []) {
@@ -48,9 +48,18 @@ export function useServerEvents(handler) {
       };
     };
     connect();
+    // Sign-out / sign-in as another account: drop the old account's socket and reconnect with the new token,
+    // so this tab never receives the previous user's bot events.
+    const onAuth = () => {
+      clearTimeout(retry);
+      if (ws) { ws.onclose = null; ws.close(); ws = null; }
+      connect();
+    };
+    authEvents.addEventListener('change', onAuth);
     return () => {
       closed = true;
       clearTimeout(retry);
+      authEvents.removeEventListener('change', onAuth);
       ws?.close();
     };
   }, []);

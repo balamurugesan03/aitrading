@@ -75,6 +75,9 @@ const authLimiter = ipRateLimit({ windowMs: 15 * 60e3, max: 30, message: 'Too ma
 const apiLimiter = ipRateLimit({ windowMs: 60e3, max: Number(process.env.IP_RATE_LIMIT_PER_MIN || 600) });
 
 function mountApi(prefix) {
+  // API answers are per user: no browser, CDN or proxy may cache them, or one account sees another's data
+  // and a started / stopped bot keeps showing its old status.
+  app.use(prefix, (_req, res, next) => { res.set({ 'Cache-Control': 'no-store, private', Vary: 'Authorization' }); next(); });
   app.use(prefix, apiLimiter);
   app.use([`${prefix}/auth/login`, `${prefix}/auth/register`, `${prefix}/auth/forgot`, `${prefix}/auth/reset`, `${prefix}/superadmin/auth/login`], authLimiter);
   app.use(prefix, express.json({ limit: '1mb' }));

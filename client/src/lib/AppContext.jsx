@@ -1,7 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { CheckCircle2, AlertTriangle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
-import { api, authEvents, getToken, setToken } from './api.js';
+import { api, authEvents, clearUserData, getToken, setToken } from './api.js';
 import { fmtMoney, FX_PAIRS, INDEX_FUTURES, isCryptoSymbol } from './format.js';
 import { useLocalState, useServerEvents } from './hooks.js';
 
@@ -20,7 +19,6 @@ function applyBranding(b) {
 }
 
 export function AppProvider({ children }) {
-  const navigate = useNavigate();
   const [authed, setAuthed] = useState(Boolean(getToken()));
   const [me, setMe] = useState(null);
   const [status, setStatus] = useState(null);
@@ -94,8 +92,10 @@ export function AppProvider({ children }) {
   }, [exInfo?.id]);
   const money = useCallback((v, d) => fmtMoney(v, currency, d), [currency]);
 
-  const login = (session) => { setToken(session.token); setMe((m) => ({ ...(m || {}), user: session.user })); navigate('/'); };
-  const logout = () => { setToken(null); navigate('/'); };
+  // Sign-in and sign-out reload the page: every page, hook, poll and socket starts fresh for the new account,
+  // so nothing from the previous account (bots, status, chat, mode) can stay in memory.
+  const login = (session) => { clearUserData(); setToken(session.token); window.location.replace('/'); };
+  const logout = () => { setToken(null); window.location.replace('/'); };
   const user = me?.user;
 
   return (

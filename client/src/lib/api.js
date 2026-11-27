@@ -4,7 +4,17 @@ try { token = localStorage.getItem(TOKEN_KEY); } catch { /* storage unavailable 
 
 export const authEvents = new EventTarget();
 export const getToken = () => token;
+// Everything this browser keeps for the signed-in account (mode, exchange, symbol, AI chat, checklist...).
+// Removed on sign-out / expired session so the next account never sees it. The Super Admin session is kept.
+export function clearUserData() {
+  try {
+    Object.keys(localStorage).filter((k) => k.startsWith('nexus.') && k !== 'nexus.sa.token').forEach((k) => localStorage.removeItem(k));
+    sessionStorage.clear();
+  } catch { /* storage unavailable */ }
+}
+
 export function setToken(t) {
+  if (!t) clearUserData();
   token = t;
   try {
     if (t) localStorage.setItem(TOKEN_KEY, t);
